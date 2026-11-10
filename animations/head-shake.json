@@ -1,0 +1,94 @@
+{
+ "format": "daz3d-mcp-clip",
+ "version": 1,
+ "name": "head-shake",
+ "description": "A no: the head turns left and right twice and comes back. 1.2 seconds.",
+ "generation": "Genesis 9",
+ "fps": 30,
+ "frames": 36,
+ "loop": false,
+ "tracks": {
+  "bones": {
+   "neck2": {
+    "rotation": [
+     [
+      0,
+      0,
+      0,
+      0
+     ],
+     [
+      6,
+      0,
+      8,
+      0
+     ],
+     [
+      14,
+      0,
+      -8,
+      0
+     ],
+     [
+      21,
+      0,
+      6,
+      0
+     ],
+     [
+      28,
+      0,
+      -6,
+      0
+     ],
+     [
+      36,
+      0,
+      0,
+      0
+     ]
+    ]
+   },
+   "head": {
+    "rotation": [
+     [
+      0,
+      0,
+      0,
+      0
+     ],
+     [
+      6,
+      0,
+      20,
+      0
+     ],
+     [
+      14,
+      0,
+      -20,
+      0
+     ],
+     [
+      21,
+      0,
+      15,
+      0
+     ],
+     [
+      28,
+      0,
+      -15,
+      0
+     ],
+     [
+      36,
+      0,
+      0,
+      0
+     ]
+    ]
+   }
+  }
+ }
+}

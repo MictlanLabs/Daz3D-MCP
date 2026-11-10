@@ -1,0 +1,124 @@
+// Tool: anim_keys_set
+// Sets keyframes on a figure, prop, camera or light.
+//
+// args:
+//   node    (string, required) label
+//   tracks  (object, required)
+//     node:       {position: [[frame, x, y, z]...], rotation: [...], scale: [[frame, s]...]}
+//     bones:      {bone: {rotation: [[frame, x, y, z]...], position: [...]}}
+//     morphs:     {dial label or name: [[frame, value]...]}
+//     properties: {property label: [[frame, value]...]}
+//     A null in [frame, x, null, z] leaves that axis without a key.
+//   replace  ([first, last] frames) first delete the keys in this range of
+//            every channel that gets new keys
+//   extend_range (bool, default true) make the scene range reach the last key
+
+function setTrack(prop, rows, axis, stats) {
+	var i, v;
+	for (i = 0; i < rows.length; i++) {
+		v = rows[i][axis + 1];
+		if (v === null || v === undefined) { continue; }
+		if (typeof v !== "number" || !isFinite(v)) { throw DazMcp.fail("bad_args", "Key values must be numbers."); }
+		DazMcp.setKey(prop, DazMcp.frameTime(rows[i][0]), v);
+		stats.keys++;
+		stats.last = stats.last === null ? rows[i][0] : Math.max(stats.last, rows[i][0]);
+		stats.first = stats.first === null ? rows[i][0] : Math.min(stats.first, rows[i][0]);
+	}
+}
+
+function checkRows(rows, width, what) {
+	var i;
+	if (!DazMcp.isArray(rows)) { throw DazMcp.fail("bad_args", what + " must be a list of [frame, ...] rows."); }
+	for (i = 0; i < rows.length; i++) {
+		if (!DazMcp.isArray(rows[i]) || rows[i].length !== width + 1 || typeof rows[i][0] !== "number") {
+			throw DazMcp.fail("bad_args", what + " rows are [frame" + (width === 3 ? ", x, y, z" : ", value") + "].");
+		}
+		if (rows[i][0] < 0) { throw DazMcp.fail("bad_args", "Frames start at 0 (" + what + ")."); }
+	}
+}
+
+function dazmcpTool(args) {
+	var node = DazMcp.requireNode(args.node, "node");
+	var tracks = args.tracks || {};
+	var stats = { keys: 0, first: null, last: null };
+	var notFound = { bones: [], morphs: [], properties: [] };
+	var replace = args.replace || null;
+	var cleared = 0;
+	var key, kind, controls, j, bone, fig, p, morphs, m, byName;
+
+	if (replace && (!DazMcp.isArray(replace) || replace.length !== 2 || replace[1] < replace[0])) {
+		throw DazMcp.fail("bad_args", "replace is [first frame, last frame].");
+	}
+	var put = function (prop, rows, axis) {
+		if (replace) { cleared += DazMcp.clearKeys(prop, DazMcp.frameTime(replace[0]), DazMcp.frameTime(replace[1])); }
+		setTrack(prop, rows, axis, stats);
+	};
+
+	if (tracks.node) {
+		for (kind in tracks.node) {
+			if (!tracks.node.hasOwnProperty(kind)) { continue; }
+			if (!DazMcp.TRANSFORMS[kind]) { throw DazMcp.fail("bad_args", "node tracks are position, rotation and scale."); }
+			controls = DazMcp.transformControls(node, kind);
+			checkRows(tracks.node[kind], controls.length === 1 ? 1 : 3, "node." + kind);
+			for (j = 0; j < controls.length; j++) { put(controls[j], tracks.node[kind], j); }
+		}
+	}
+	if (tracks.bones) {
+		fig = DazMcp.requireFigure(args.node);
+		for (key in tracks.bones) {
+			if (!tracks.bones.hasOwnProperty(key)) { continue; }
+			bone = DazMcp.findBone(fig, key);
+			if (!bone) { notFound.bones.push(key); continue; }
+			for (kind in tracks.bones[key]) {
+				if (!tracks.bones[key].hasOwnProperty(kind)) { continue; }
+				if (kind !== "rotation" && kind !== "position") {
+					throw DazMcp.fail("bad_args", "bone tracks are rotation and position (" + key + "." + kind + ").");
+				}
+				checkRows(tracks.bones[key][kind], 3, key + "." + kind);
+				controls = DazMcp.transformControls(bone, kind);
+				for (j = 0; j < 3; j++) { put(controls[j], tracks.bones[key][kind], j); }
+			}
+		}
+	}
+	if (tracks.morphs) {
+		morphs = DazMcp.morphList(node, { raw: true, include_hidden: true }).raw;
+		byName = {};
+		for (j = 0; j < morphs.length; j++) {
+			byName[DazMcp.lower(morphs[j].prop.getLabel())] = morphs[j].prop;
+			byName[DazMcp.lower(morphs[j].name)] = morphs[j].prop;
+		}
+		for (key in tracks.morphs) {
+			if (!tracks.morphs.hasOwnProperty(key)) { continue; }
+			m = byName[DazMcp.lower(key)];
+			if (!m) { notFound.morphs.push(key); continue; }
+			checkRows(tracks.morphs[key], 1, "morphs." + key);
+			put(m, tracks.morphs[key], 0);
+		}
+	}
+	if (tracks.properties) {
+		for (key in tracks.properties) {
+			if (!tracks.properties.hasOwnProperty(key)) { continue; }
+			p = DazMcp.findPropDeep(node, [key]);
+			if (!p) { notFound.properties.push(key); continue; }
+			checkRows(tracks.properties[key], 1, "properties." + key);
+			put(p, tracks.properties[key], 0);
+		}
+	}
+	var extended = false;
+	if (args.extend_range !== false && stats.last !== null) { extended = DazMcp.extendRange(Math.ceil(stats.last)); }
+	var r = Scene.getAnimRange();
+	var out = {
+		node: node.getLabel(),
+		keys_set: stats.keys,
+		first_frame: stats.first,
+		last_frame: stats.last,
+		range: [DazMcp.timeFrame(r.start), DazMcp.timeFrame(r.end)],
+		range_extended: extended
+	};
+	if (replace) { out.keys_replaced = cleared; }
+	if (notFound.bones.length || notFound.morphs.length || notFound.properties.length) {
+		out.not_found = notFound;
+		if (notFound.bones.length) { out.hint = "figure_info with all_bones=true lists the bone names of this figure."; }
+	}
+	return out;
+}

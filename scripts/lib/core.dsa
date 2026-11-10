@@ -8,7 +8,7 @@
 
 var DazMcp = {};
 
-DazMcp.LIB_VERSION = "0.3.0";
+DazMcp.LIB_VERSION = "0.4.0";
 
 // ---------------------------------------------------------------- JSON ----
 // Daz Studio 4.x and 6 both ship a JSON object, but keep a tiny fallback so an
@@ -888,4 +888,179 @@ DazMcp.boxInfo = function (box) {
 	var r = function (v) { return [DazMcp.round(v[0], 2), DazMcp.round(v[1], 2), DazMcp.round(v[2], 2)]; };
 	return { min: r(box.min), max: r(box.max),
 		size: r([box.max[0] - box.min[0], box.max[1] - box.min[1], box.max[2] - box.min[2]]) };
+};
+
+
+// ======================================================= stage 4 helpers ==
+// Animation: time, keyframes and the channels (animated values) of a node.
+// Daz counts time in ticks, 4800 per second; a frame lasts getTimeStep() ticks.
+
+DazMcp.TICKS_PER_SECOND = 4800;
+
+DazMcp.fps = function () {
+	var step = Scene.getTimeStep();
+	return step ? DazMcp.round(DazMcp.TICKS_PER_SECOND / step, 3) : 30;
+};
+
+DazMcp.frameTime = function (frame) {
+	return Math.round(Number(frame) * Scene.getTimeStep());
+};
+
+DazMcp.timeFrame = function (t) {
+	return DazMcp.round(t / Scene.getTimeStep(), 3);
+};
+
+DazMcp.TRANSFORMS = {
+	position: ["getXPosControl", "getYPosControl", "getZPosControl"],
+	rotation: ["getXRotControl", "getYRotControl", "getZRotControl"],
+	scale: ["getScaleControl"]
+};
+
+DazMcp.numKeys = function (prop) {
+	try { return prop.getNumKeys(); } catch (e) { return 0; }
+};
+
+// [[time, value], ...] of an animated property.
+DazMcp.readKeys = function (prop) {
+	var out = [];
+	var n = DazMcp.numKeys(prop);
+	var i;
+	for (i = 0; i < n; i++) { out.push([prop.getKeyTime(i), prop.getKeyValue(i)]); }
+	return out;
+};
+
+// Removes keys between two times (ticks, inclusive), or all of them.
+DazMcp.clearKeys = function (prop, start, end) {
+	var before = DazMcp.numKeys(prop);
+	var i, t;
+	if (!before) { return 0; }
+	if (start === undefined || start === null) {
+		try { prop.deleteAllKeys(); return before; } catch (e) { start = -1e12; end = 1e12; }
+	}
+	try {
+		prop.deleteKeys(new DzTimeRange(start, end));
+	} catch (e2) {
+		for (i = before - 1; i >= 0; i--) {
+			t = prop.getKeyTime(i);
+			if (t >= start && t <= end) { prop.deleteKey(i); }
+		}
+	}
+	return before - DazMcp.numKeys(prop);
+};
+
+DazMcp.setKey = function (prop, time, value) {
+	prop.setValue(time, value);
+};
+
+// The value of a property at a time (ticks).
+DazMcp.valueAt = function (prop, time) {
+	try { return prop.getValue(time); } catch (e) { /* set the scene time instead */ }
+	var keep = Scene.getTime();
+	Scene.setTime(time);
+	var v = prop.getValue();
+	Scene.setTime(keep);
+	return v;
+};
+
+DazMcp.transformControls = function (node, kind) {
+	var names = DazMcp.TRANSFORMS[kind];
+	var out = [];
+	var i;
+	for (i = 0; i < names.length; i++) { out.push(node[names[i]]()); }
+	return out;
+};
+
+// Everything of a node that can be animated, as channels:
+//   {group: "node"|"bones"|"morphs", item, kind, axis, prop}
+//   opts.bones: false to skip bones; opts.morphs: false to skip morphs;
+//   opts.only_keyed: only channels with keys; opts.bone_list: only these bones.
+DazMcp.channels = function (node, opts) {
+	var out = [];
+	var kinds = ["position", "rotation", "scale"];
+	var i, j, k, controls, bones, b, morphs, want;
+	opts = opts || {};
+	var add = function (group, item, kind, axis, prop) {
+		if (opts.only_keyed && !DazMcp.numKeys(prop)) { return; }
+		out.push({ group: group, item: item, kind: kind, axis: axis, prop: prop });
+	};
+	if (opts.node !== false) {
+		for (k = 0; k < kinds.length; k++) {
+			controls = DazMcp.transformControls(node, kinds[k]);
+			for (j = 0; j < controls.length; j++) { add("node", node.getLabel(), kinds[k], j, controls[j]); }
+		}
+	}
+	if (opts.bones !== false && DazMcp.inherits(node, "DzSkeleton")) {
+		want = null;
+		if (opts.bone_list) {
+			want = {};
+			for (i = 0; i < opts.bone_list.length; i++) { want[DazMcp.lower(opts.bone_list[i])] = true; }
+		}
+		bones = DazMcp.bones(node);
+		for (i = 0; i < bones.length; i++) {
+			b = bones[i];
+			if (want && !want[DazMcp.lower(b.getName())] && !want[DazMcp.lower(b.getLabel())]) { continue; }
+			for (k = 0; k < 2; k++) {
+				controls = DazMcp.transformControls(b, kinds[k]);
+				for (j = 0; j < 3; j++) { add("bones", String(b.getName()), kinds[k], j, controls[j]); }
+			}
+		}
+	}
+	if (opts.morphs !== false) {
+		morphs = DazMcp.morphList(node, { raw: true, include_hidden: true }).raw;
+		for (i = 0; i < morphs.length; i++) { add("morphs", morphs[i].prop.getLabel(), "value", 0, morphs[i].prop); }
+	}
+	return out;
+};
+
+// First and last key time (ticks) over channels; null when nothing is keyed.
+DazMcp.keyRange = function (channels) {
+	var lo = null;
+	var hi = null;
+	var i, n, a, b;
+	for (i = 0; i < channels.length; i++) {
+		n = DazMcp.numKeys(channels[i].prop);
+		if (!n) { continue; }
+		a = channels[i].prop.getKeyTime(0);
+		b = channels[i].prop.getKeyTime(n - 1);
+		lo = lo === null ? a : Math.min(lo, a);
+		hi = hi === null ? b : Math.max(hi, b);
+	}
+	return lo === null ? null : { start: lo, end: hi };
+};
+
+// Moves keys to new times: map(time) -> new time. Two keys that land on the
+// same tick keep the later one.
+DazMcp.remapKeys = function (prop, map) {
+	var keys = DazMcp.readKeys(prop);
+	var i, t;
+	if (!keys.length) { return 0; }
+	DazMcp.clearKeys(prop);
+	for (i = 0; i < keys.length; i++) {
+		t = Math.round(map(keys[i][0]));
+		DazMcp.setKey(prop, t, keys[i][1]);
+	}
+	return keys.length;
+};
+
+// Makes the scene's animation range reach a frame.
+DazMcp.extendRange = function (lastFrame) {
+	var range = Scene.getAnimRange();
+	var end = DazMcp.frameTime(lastFrame);
+	if (end > range.end) {
+		Scene.setAnimRange(new DzTimeRange(range.start, end));
+		try { Scene.setPlayRange(new DzTimeRange(range.start, end)); } catch (e) { /* older API */ }
+		return true;
+	}
+	return false;
+};
+
+DazMcp.rotationOrder = function (bone) {
+	var ro, s;
+	var names = ["XYZ", "YZX", "ZYX", "ZXY", "XZY", "YXZ"];
+	try { ro = bone.getRotationOrder(); } catch (e) { return null; }
+	if (ro === undefined || ro === null) { return null; }
+	if (typeof ro === "number") { return names[ro] || null; }
+	try { if (typeof ro.order === "number") { return names[ro.order] || null; } } catch (e2) { /* string next */ }
+	s = String(ro).toUpperCase().replace(/[^XYZ]/g, "");
+	return s.length === 3 ? s : null;
 };

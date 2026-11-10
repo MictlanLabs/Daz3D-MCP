@@ -36,6 +36,7 @@ KIND_BY_TYPE = {
     "scene": "scene",
     "scene_subset": "scene_subset",
     "preset_pose": "pose",
+    "preset_animation": "animation",
     "preset_hierarchical_pose": "pose",
     "preset_puppeteer": "pose",
     "preset_material": "material",
@@ -84,9 +85,13 @@ def kind_of(relative: str, asset_type: str | None) -> str:
     kind = KIND_BY_TYPE.get(asset_type or "")
     if asset_type and asset_type.startswith("preset_") and kind is None:
         kind = "preset"
+    if kind == "pose" and ("/animation" in rel or "/animations/" in rel or "/aniblocks/" in rel):
+        kind = "animation"  # animated pose presets live in Animation(s) folders
     if kind is None:
         # No or unknown header: guess from the folder names.
-        if "/poses/" in rel or "/pose/" in rel:
+        if "/animations/" in rel or "/animation/" in rel:
+            kind = "animation"
+        elif "/poses/" in rel or "/pose/" in rel:
             kind = "pose"
         elif "/materials/" in rel or "/shaders/" in rel:
             kind = "material"

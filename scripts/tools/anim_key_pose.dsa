@@ -1,0 +1,70 @@
+// Tool: anim_key_pose
+// Keys the figure's current pose (bone rotations, the hip's translation and,
+// optionally, the figure's own placement) at one or more frames. Use it after
+// loading a pose preset or posing with pose_bones to make a key pose.
+//
+// args:
+//   figure     (string, required) label
+//   frames     ([number], required) frames to key
+//   all_bones  (bool) key every bone; default only bones that are posed or
+//              already animated, plus the hip
+//   with_node  (bool) also key the figure's position and rotation
+//   morphs     ([string]) also key these dials
+
+function dazmcpTool(args) {
+	var fig = DazMcp.requireFigure(args.figure);
+	var frames = args.frames || [];
+	var bones = DazMcp.bones(fig);
+	var now = Scene.getTime();
+	var keyed = 0;
+	var used = [];
+	var i, j, f, b, controls, values, posed, hip;
+	if (!frames.length) { throw DazMcp.fail("bad_args", "frames is required, e.g. [0]."); }
+	var root = null;
+	for (i = 0; i < bones.length; i++) {
+		var p = bones[i].getNodeParent();
+		if (!p || DazMcp.nodeType(p) !== "bone") { root = root || bones[i]; }
+	}
+	var keyControls = function (list) {
+		var vals = [];
+		for (j = 0; j < list.length; j++) { vals.push(DazMcp.valueAt(list[j], now)); }
+		for (f = 0; f < frames.length; f++) {
+			for (j = 0; j < list.length; j++) { DazMcp.setKey(list[j], DazMcp.frameTime(frames[f]), vals[j]); keyed++; }
+		}
+	};
+	for (i = 0; i < bones.length; i++) {
+		b = bones[i];
+		controls = DazMcp.transformControls(b, "rotation");
+		values = [controls[0].getValue(), controls[1].getValue(), controls[2].getValue()];
+		posed = Math.abs(values[0]) > 0.01 || Math.abs(values[1]) > 0.01 || Math.abs(values[2]) > 0.01;
+		hip = root && DazMcp.same(b, root);
+		var animated = DazMcp.numKeys(controls[0]) || DazMcp.numKeys(controls[1]) || DazMcp.numKeys(controls[2]);
+		if (!(args.all_bones === true || posed || hip || animated)) { continue; }
+		keyControls(controls);
+		if (hip) { keyControls(DazMcp.transformControls(b, "position")); }
+		used.push(String(b.getName()));
+	}
+	if (args.with_node === true) {
+		keyControls(DazMcp.transformControls(fig, "position"));
+		keyControls(DazMcp.transformControls(fig, "rotation"));
+	}
+	var missing = [];
+	if (args.morphs && args.morphs.length) {
+		var list = DazMcp.morphList(fig, { raw: true, include_hidden: true }).raw;
+		var want, found;
+		for (i = 0; i < args.morphs.length; i++) {
+			want = DazMcp.lower(args.morphs[i]);
+			found = null;
+			for (j = 0; j < list.length; j++) {
+				if (DazMcp.lower(list[j].prop.getLabel()) === want || DazMcp.lower(list[j].name) === want) { found = list[j].prop; }
+			}
+			if (found) { keyControls([found]); } else { missing.push(args.morphs[i]); }
+		}
+	}
+	var last = frames[0];
+	for (f = 1; f < frames.length; f++) { last = Math.max(last, frames[f]); }
+	DazMcp.extendRange(Math.ceil(last));
+	var out = { figure: fig.getLabel(), frames: frames, bones: used, keys_set: keyed };
+	if (missing.length) { out.morphs_not_found = missing; }
+	return out;
+}

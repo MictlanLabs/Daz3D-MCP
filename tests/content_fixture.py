@@ -61,6 +61,9 @@ LIBRARY: dict[str, tuple[str, dict]] = {
                                  "r_forearm": [0, 110, 0]}}),
     "People/Genesis 9/Poses/Waving.duf": (
         "preset_pose", {"pose": {"r_upperarm": [0, 0, -40], "r_forearm": [0, 0, -100], "head": [0, -8, 0]}}),
+    "People/Genesis 9/Animations/Little Hop.duf": (
+        "preset_pose", {"animation": {"l_thigh": [[0, 0, 0, 0], [10, -30, 0, 0], [20, 0, 0, 0]],
+                                      "r_thigh": [[0, 0, 0, 0], [10, -30, 0, 0], [20, 0, 0, 0]]}}),
     "People/Genesis 9/Materials/Basic Wear Shirt Red.duf": (
         "preset_material", {"materials": {"Shirt": {"Base Color": [0.7, 0.1, 0.1]}}}),
     "People/Genesis 8 Female/Clothing/Old Jacket.duf": (

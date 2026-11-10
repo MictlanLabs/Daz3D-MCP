@@ -136,7 +136,7 @@ def test_pose_bones_and_reset(client):
     client.run_tool("pose_bones", {"figure": "Genesis 9", "bones": {"head": [0, 5, 0]}, "relative": True})
     info = client.run_tool("figure_info", {"figure": "Genesis 9", "all_bones": True})
     assert {b["bone"]: b["rotation"] for b in info["posed_bones"]}["head"] == [0, 20, 0]
-    assert len(info["bones"]) == 22
+    assert len(info["bones"]) == 25
     reset = client.run_tool("pose_reset", {"figure": "Genesis 9"})
     assert reset["values_reset"] == 2
     assert client.run_tool("figure_info", {"figure": "Genesis 9"})["posed_bones"] == []

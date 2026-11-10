@@ -1,0 +1,112 @@
+// Tool: anim_offset
+// Moves a node's animation in time and/or in space: start it later or
+// earlier, carry the whole motion to another place, turn its path, or make it
+// start at a given spot on the floor.
+//
+// args:
+//   node      (string, required) label
+//   frames    (number) shift every key this many frames (negative = earlier)
+//   move      ([x, y, z] cm) carry the whole motion
+//   turn      (number) degrees to turn the whole motion around the node (Y axis)
+//   start_at  ([x, z] cm) put the figure's hip (or the node) here at the first key
+//   with_followers (bool) also shift the keys of clothing and hair in time
+
+function shiftValues(prop, delta) {
+	var keys = DazMcp.readKeys(prop);
+	var i;
+	if (!keys.length) { prop.setValue(prop.getValue() + delta); return 0; }
+	for (i = 0; i < keys.length; i++) { DazMcp.setKey(prop, keys[i][0], keys[i][1] + delta); }
+	return keys.length;
+}
+
+function rootBone(fig) {
+	var bones = DazMcp.bones(fig);
+	var i, p;
+	for (i = 0; i < bones.length; i++) {
+		p = bones[i].getNodeParent();
+		if (!p || DazMcp.nodeType(p) !== "bone") { return bones[i]; }
+	}
+	return null;
+}
+
+function dazmcpTool(args) {
+	var node = DazMcp.requireNode(args.node, "node");
+	var step = Scene.getTimeStep();
+	var report = { node: node.getLabel() };
+	var nodes = [node];
+	var ch, i, n, kr;
+	if (args.with_followers === true) { nodes = nodes.concat(DazMcp.followers(node)); }
+
+	if (args.frames) {
+		var shift = Math.round(args.frames * step);
+		ch = [];
+		for (n = 0; n < nodes.length; n++) { ch = ch.concat(DazMcp.channels(nodes[n], { only_keyed: true })); }
+		if (!ch.length) { throw DazMcp.fail("not_animated", node.getLabel() + " has no keyframes to shift."); }
+		kr = DazMcp.keyRange(ch);
+		if (kr.start + shift < 0) {
+			throw DazMcp.fail("bad_args", "That would put keys before frame 0 (the first key is at frame " +
+				DazMcp.timeFrame(kr.start) + ").");
+		}
+		var moved = 0;
+		for (i = 0; i < ch.length; i++) { moved += DazMcp.remapKeys(ch[i].prop, function (t) { return t + shift; }); }
+		DazMcp.extendRange(Math.ceil(DazMcp.timeFrame(kr.end + shift)));
+		report.keys_shifted = moved;
+	}
+
+	var pos = DazMcp.transformControls(node, "position");
+	var rot = DazMcp.transformControls(node, "rotation");
+	if (args.turn) {
+		var pivot = [DazMcp.valueAt(pos[0], 0), DazMcp.valueAt(pos[2], 0)];
+		var xs = DazMcp.readKeys(pos[0]);
+		var zs = DazMcp.readKeys(pos[2]);
+		if (xs.length || zs.length) {
+			var times = {};
+			for (i = 0; i < xs.length; i++) { times[xs[i][0]] = true; }
+			for (i = 0; i < zs.length; i++) { times[zs[i][0]] = true; }
+			var list = [];
+			for (i in times) { if (times.hasOwnProperty(i)) { list.push(Number(i)); } }
+			list.sort(function (a, b) { return a - b; });
+			pivot = [DazMcp.valueAt(pos[0], list[0]), DazMcp.valueAt(pos[2], list[0])];
+			var a = args.turn * Math.PI / 180;
+			var vals = [];
+			for (i = 0; i < list.length; i++) { vals.push([DazMcp.valueAt(pos[0], list[i]), DazMcp.valueAt(pos[2], list[i])]); }
+			for (i = 0; i < list.length; i++) {
+				var dx = vals[i][0] - pivot[0];
+				var dz = vals[i][1] - pivot[1];
+				// Turning by +a about Y: x' = x cos a + z sin a, z' = -x sin a + z cos a.
+				DazMcp.setKey(pos[0], list[i], pivot[0] + dx * Math.cos(a) + dz * Math.sin(a));
+				DazMcp.setKey(pos[2], list[i], pivot[1] - dx * Math.sin(a) + dz * Math.cos(a));
+			}
+		}
+		shiftValues(rot[1], args.turn);
+		report.turned = args.turn;
+	}
+	var move = DazMcp.checkVec(args.move, "move");
+	if (args.start_at) {
+		if (!DazMcp.isArray(args.start_at) || args.start_at.length !== 2) {
+			throw DazMcp.fail("bad_args", "start_at is [x, z] in cm.");
+		}
+		ch = DazMcp.channels(node, { only_keyed: true });
+		kr = DazMcp.keyRange(ch);
+		var t0 = kr ? kr.start : Scene.getTime();
+		var keep = Scene.getTime();
+		Scene.setTime(t0);
+		var ref = DazMcp.inherits(node, "DzSkeleton") ? rootBone(node) : null;
+		var w = (ref || node).getWSPos();
+		Scene.setTime(keep);
+		move = move || [0, 0, 0];
+		move = [move[0] + args.start_at[0] - w.x, move[1], move[2] + args.start_at[1] - w.z];
+	}
+	if (move) {
+		// The node's own translation is in its parent's space; scale does not change it.
+		for (i = 0; i < 3; i++) { if (move[i]) { shiftValues(pos[i], move[i]); } }
+		report.moved = [DazMcp.round(move[0], 2), DazMcp.round(move[1], 2), DazMcp.round(move[2], 2)];
+	}
+	ch = DazMcp.channels(node, { only_keyed: true });
+	kr = DazMcp.keyRange(ch);
+	if (kr) { report.first_frame = DazMcp.timeFrame(kr.start); report.last_frame = DazMcp.timeFrame(kr.end); }
+	var t = DazMcp.transformOf(node);
+	report.position = t.position;
+	report.rotation = t.rotation;
+	return report;
+}

@@ -52,7 +52,7 @@ def test_agent_builds_and_renders_two_dressed_posed_characters(bridge, daz_home,
 
                 await tool("scene_new")
                 libs = await tool("content_libraries")
-                assert libs["files"] == 16
+                assert libs["files"] == 17
 
                 # 1. Two Genesis 9 figures, one per side.
                 base = (await tool("content_search", query="genesis 9", kind="figure"))["results"][0]

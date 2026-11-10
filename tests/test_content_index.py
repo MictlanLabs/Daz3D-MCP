@@ -37,7 +37,7 @@ def test_kinds_and_generations():
 
 def test_search(tmp_path):
     lib, idx = _index(tmp_path)
-    assert idx.file_count == 16  # data/ and .png files are skipped
+    assert idx.file_count == 17  # data/ and .png files are skipped
 
     hair = idx.search(kind="hair")["results"]
     assert {r["name"] for r in hair} == {"Short Bob Hair", "Buzz Cut Hair"}
@@ -73,11 +73,11 @@ def test_cache_is_reused_and_refreshed(tmp_path):
 
     (lib / "Props/New Lamp.duf").write_text('{"asset_info": {"type": "prop"}}')
     again = ContentIndex([str(lib)], cache_path=tmp_path / "index.json").load()
-    assert again.file_count == 16  # still the cached list
+    assert again.file_count == 17  # still the cached list
     fresh = ContentIndex([str(lib)], cache_path=tmp_path / "index.json").load(refresh=True)
-    assert fresh.file_count == 17
+    assert fresh.file_count == 18
     expired = ContentIndex([str(lib)], cache_path=tmp_path / "index.json", max_age_hours=0).load()
-    assert expired.file_count == 17
+    assert expired.file_count == 18
 
 
 def test_resolve_relative_paths(tmp_path):

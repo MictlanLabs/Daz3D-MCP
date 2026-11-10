@@ -58,14 +58,45 @@ var PROP_CLASSES = {
 
 // --------------------------------------------------------- templates ----
 // What a Genesis 9 looks like to the scripts: bones, dials and surfaces.
+// [name, label, parent, origin, end point, orientation (quaternion), rotation order]
+// Numbers are close to a real Genesis 9 (cm, A pose, facing +Z). Arm bones
+// are tilted 45 degrees so their X axis runs along the arm, as in Daz.
+function qz(deg) { var a = deg * Math.PI / 360; return [0, 0, Math.sin(a), Math.cos(a)]; }
+function side(rows) {
+	var out = [];
+	rows.forEach(function (r) {
+		out.push(r);
+		var m = r.slice();
+		m[0] = "r_" + r[0].slice(2);
+		m[1] = "Right " + r[1].slice(5);
+		m[2] = r[2] && r[2].indexOf("l_") === 0 ? "r_" + r[2].slice(2) : r[2];
+		m[3] = [-r[3][0], r[3][1], r[3][2]];
+		m[4] = [-r[4][0], r[4][1], r[4][2]];
+		m[5] = r[5] ? [r[5][0], r[5][1], -r[5][2], r[5][3]] : null;
+		out.push(m);
+	});
+	return out;
+}
 var G9_BONES = [
-	["hip", "Hip"], ["pelvis", "Pelvis"], ["spine1", "Abdomen Lower"], ["spine2", "Abdomen Upper"],
-	["spine3", "Chest Lower"], ["spine4", "Chest Upper"], ["neck1", "Neck Lower"], ["head", "Head"],
-	["l_shoulder", "Left Shoulder"], ["l_upperarm", "Left Upper Arm"], ["l_forearm", "Left Forearm"],
-	["l_hand", "Left Hand"], ["r_shoulder", "Right Shoulder"], ["r_upperarm", "Right Upper Arm"],
-	["r_forearm", "Right Forearm"], ["r_hand", "Right Hand"], ["l_thigh", "Left Thigh"], ["l_shin", "Left Shin"],
-	["l_foot", "Left Foot"], ["r_thigh", "Right Thigh"], ["r_shin", "Right Shin"], ["r_foot", "Right Foot"]
-];
+	["hip", "Hip", null, [0, 100, 0], [0, 108, 0], null, "YZX"],
+	["pelvis", "Pelvis", "hip", [0, 100, 0], [0, 88, 0], null, "YZX"],
+	["spine1", "Abdomen Lower", "hip", [0, 106, -1], [0, 116, -1], null, "YZX"],
+	["spine2", "Abdomen Upper", "spine1", [0, 116, -1], [0, 126, -1], null, "YZX"],
+	["spine3", "Chest Lower", "spine2", [0, 126, -1], [0, 136, -1], null, "YZX"],
+	["spine4", "Chest Upper", "spine3", [0, 136, -1], [0, 148, -2], null, "YZX"],
+	["neck1", "Neck Lower", "spine4", [0, 148, -2], [0, 154, -1], null, "YZX"],
+	["neck2", "Neck Upper", "neck1", [0, 154, -1], [0, 160, 0], null, "YZX"],
+	["head", "Head", "neck2", [0, 160, 0], [0, 178, 0], null, "YZX"]
+].concat(side([
+	["l_shoulder", "Left Shoulder", "spine4", [3, 144, -2], [16, 146, -3], null, "XYZ"],
+	["l_upperarm", "Left Upper Arm", "l_shoulder", [17, 145, -3], [38, 124, -3], qz(-45), "XYZ"],
+	["l_forearm", "Left Forearm", "l_upperarm", [38, 124, -3], [56, 106, -1], qz(-45), "XYZ"],
+	["l_hand", "Left Hand", "l_forearm", [56, 106, -1], [63, 99, 0], qz(-45), "XYZ"],
+	["l_thigh", "Left Thigh", "pelvis", [9, 95, 0], [10, 52, 0], null, "YZX"],
+	["l_shin", "Left Shin", "l_thigh", [10, 52, 0], [10, 8, -2], null, "YZX"],
+	["l_foot", "Left Foot", "l_shin", [10, 8, -2], [10, 3, 10], null, "YZX"],
+	["l_toes", "Left Toes", "l_foot", [10, 3, 10], [10, 1, 18], null, "YZX"]
+]));
 
 function skinProps(color) {
 	return {
@@ -189,12 +220,23 @@ Prop.prototype.getLabel = function () { return this.l; };
 Prop.prototype.getName = function () { return this.d.name || this.l; };
 Prop.prototype.className = function () { return PROP_CLASSES[this.d.type || "float"][0]; };
 Prop.prototype.inherits = function (c) { return PROP_CLASSES[this.d.type || "float"].indexOf(c) >= 0; };
-Prop.prototype.getValue = function () {
+Prop.prototype.getValue = function (t) {
 	if (this.d.type === "bool") { return this.d.value ? 1 : 0; }
 	if (this.d.type === "node") { return wrap(byId(this.d.value)); }
+	if (this.d.keys && this.d.keys.length) { return keyValue(this.d.keys, arguments.length ? t : now()); }
 	return this.d.value;
 };
 Prop.prototype.setValue = function (v) {
+	if (arguments.length > 1 || (this.d.keys && this.d.keys.length) || (now() !== 0 && (this.d.type || "float") === "float")) {
+		var d = this.d;
+		var host = {};
+		keyMethods(host, function (create) { if (create && !d.keys) { d.keys = []; } return d.keys || null; },
+			function () { return d.value; }, function (x) { d.value = x; },
+			d.min !== undefined ? function (x) { return Math.max(d.min, Math.min(d.max, x)); } : null);
+		host.setValue.apply(host, arguments);
+		this.onChange();
+		return;
+	}
 	if (this.d.type === "node") {
 		if (v !== null && !(v instanceof Node)) { throw new Error("setValue on a node property needs a DzNode"); }
 		this.d.value = v ? v.d.id : null;
@@ -209,6 +251,19 @@ Prop.prototype.setValue = function (v) {
 	this.onChange();
 };
 Prop.prototype.getDefaultValue = function () { return this.d.def || 0; };
+Prop.prototype.getNumKeys = function () { return this.d.keys ? this.d.keys.length : 0; };
+Prop.prototype.getKeyTime = function (i) { return this.d.keys[i][0]; };
+Prop.prototype.getKeyValue = function (i) { return this.d.keys[i][1]; };
+Prop.prototype.deleteAllKeys = function () {
+	if (this.d.keys && this.d.keys.length) { this.d.value = this.getValue(); this.d.keys = []; this.onChange(); }
+};
+Prop.prototype.deleteKeys = function (range) {
+	if (!this.d.keys) { return; }
+	var v = this.getValue();
+	this.d.keys = this.d.keys.filter(function (k) { return k[0] < range.start || k[0] > range.end; });
+	if (!this.d.keys.length) { this.d.value = v; }
+	this.onChange();
+};
 Prop.prototype.getMin = function () { return this.d.min; };
 Prop.prototype.getMax = function () { return this.d.max; };
 Prop.prototype.isHidden = function () { return !!this.d.hidden; };
@@ -238,16 +293,83 @@ Prop.prototype.setMap = function (tex) {
 	this.onChange();
 };
 
-// A transform dial bound to an [x, y, z] array of the node.
-function TransformProp(d, key, index, fallback) {
-	this.getValue = function () { return (d[key] || fallback)[index]; };
-	this.setValue = function (v) {
+// ------------------------------------------------------------ keys ----
+// Animated properties hold keys [[time, value], ...]; values between keys are
+// interpolated linearly (Daz uses its own interpolation, TCB by default).
+function keyValue(keys, t) {
+	if (t <= keys[0][0]) { return keys[0][1]; }
+	if (t >= keys[keys.length - 1][0]) { return keys[keys.length - 1][1]; }
+	for (var i = 1; i < keys.length; i++) {
+		if (t <= keys[i][0]) {
+			var a = keys[i - 1], b = keys[i];
+			return a[1] + (b[1] - a[1]) * (t - a[0]) / (b[0] - a[0]);
+		}
+	}
+	return keys[keys.length - 1][1];
+}
+
+function now() { return Scene.getTime(); }
+
+// Adds the key methods of DzFloatProperty to a property object.
+//   keys(create): the key list (made when create is true)
+//   get(), set(v): the value when it is not animated
+function keyMethods(obj, keys, get, set, clamp) {
+	obj.getValue = function (t) {
+		var k = keys(false);
+		if (k && k.length) { return keyValue(k, arguments.length ? t : now()); }
+		return get();
+	};
+	obj.setValue = function (a, b) {
+		var t = arguments.length > 1 ? a : null;
+		var v = arguments.length > 1 ? b : a;
 		if (typeof v !== "number" || isNaN(v)) { throw new Error("setValue needs a number"); }
-		if (!d[key]) { d[key] = fallback.slice(); }
-		d[key][index] = v;
+		v = clamp ? clamp(v) : v;
+		var k = keys(false);
+		if (t === null && !(k && k.length) && now() === 0) { set(v); changed(); return; }
+		if (t === null) { t = now(); }
+		if (typeof t !== "number" || isNaN(t)) { throw new Error("setValue(time, value) needs a DzTime"); }
+		k = keys(true);
+		for (var i = 0; i < k.length; i++) {
+			if (Math.abs(k[i][0] - t) < 0.5) { k[i][1] = v; changed(); return; }
+			if (k[i][0] > t) { k.splice(i, 0, [t, v]); changed(); return; }
+		}
+		k.push([t, v]);
 		changed();
 	};
+	obj.getNumKeys = function () { var k = keys(false); return k ? k.length : 0; };
+	obj.getKeyTime = function (i) { return keys(false)[i][0]; };
+	obj.getKeyValue = function (i) { return keys(false)[i][1]; };
+	obj.deleteAllKeys = function () {
+		var k = keys(false);
+		if (k && k.length) { set(obj.getValue()); k.length = 0; changed(); }
+	};
+	obj.deleteKeys = function (range) {
+		var k = keys(false);
+		if (!k) { return; }
+		var v = obj.getValue();
+		var keep = k.filter(function (key) { return key[0] < range.start || key[0] > range.end; });
+		if (keep.length !== k.length) {
+			if (!keep.length) { set(v); }
+			k.length = 0;
+			keep.forEach(function (key) { k.push(key); });
+			changed();
+		}
+	};
+	obj.isAnimatable = function () { return true; };
+}
+
+// A transform dial bound to an [x, y, z] array of the node.
+function TransformProp(d, key, index, fallback) {
+	var id = key + index;
+	keyMethods(this, function (create) {
+		if (create) { d.keys = d.keys || {}; d.keys[id] = d.keys[id] || []; }
+		return d.keys ? d.keys[id] : null;
+	}, function () { return (d[key] || fallback)[index]; }, function (v) {
+		if (!d[key]) { d[key] = fallback.slice(); }
+		d[key][index] = v;
+	});
 	this.getDefaultValue = function () { return fallback[index]; };
+	this.getLabel = function () { return ({ position: "Translate", rotation: "Rotate" })[key] + " " + "XYZ"[index]; };
 }
 
 function propertyHost(props) {
@@ -333,7 +455,8 @@ Node.prototype.getWSScale = function () {
 	return parent ? s * wrap(parent).getWSScale() : s;
 };
 Node.prototype.getWSPos = function () {
-	var p = (this.d.position || [0, 0, 0]).slice();
+	if (this.d.class === "DzBone" && this.d.origin) { return new Vec(boneWorld(this.d).P); }
+	var p = valuesOf(this.d, "position", [0, 0, 0]);
 	var parent = byId(this.d.parent);
 	if (parent) {
 		var pp = wrap(parent).getWSPos();
@@ -371,10 +494,22 @@ Node.prototype.getWSBoundingBox = function () {
 	};
 };
 Node.prototype.getFollowTarget = function () { return wrap(byId(this.d.fitted_to)); };
-Node.prototype.getSkeleton = function () { return this.className() === "DzBone" ? wrap(byId(this.d.parent)) : null; };
+Node.prototype.getSkeleton = function () { return this.className() === "DzBone" ? wrap(byId(this.d.skel || this.d.parent)) : null; };
+Node.prototype.getOrigin = function () { return new Vec(this.d.origin || [0, 0, 0]); };
+Node.prototype.getEndPoint = function () { return new Vec(this.d.end || this.d.origin || [0, 0, 0]); };
+Node.prototype.getOrientation = function () {
+	var q = this.d.orient || [0, 0, 0, 1];
+	return { x: q[0], y: q[1], z: q[2], w: q[3] };
+};
+Node.prototype.getRotationOrder = function () {
+	var o = this.d.order || "XYZ";
+	return { toString: function () { return o; } };
+};
 Node.prototype.boneNodes = function () {
 	var id = this.d.id;
-	return state.nodes.filter(function (n) { return n.parent === id && n.class === "DzBone"; }).map(wrap);
+	return state.nodes.filter(function (n) {
+		return n.class === "DzBone" && (n.skel === id || (n.skel === undefined && n.parent === id));
+	}).map(wrap);
 };
 Node.prototype.getNumBones = function () {
 	return typeof this.d.bones === "number" ? this.d.bones : this.boneNodes().length;
@@ -425,10 +560,69 @@ function material(m) {
 	return host;
 }
 
+// ---------------------------------------------------------- skeleton ----
+// Forward kinematics, with the convention Daz is assumed to use: a bone turns
+// by parent * Q * E * Q^-1 (Q its orientation, E its dials in its rotation
+// order, first letter applied first). DAZMCP_FAKE_CONVENTION picks another
+// one, to test that anim_import finds out which one Daz uses.
+var CONV = (process.env.DAZMCP_FAKE_CONVENTION || "applied/qeq").split("/");
+
+function valuesOf(d, key, fallback) {
+	return [0, 1, 2].map(function (i) { return new TransformProp(d, key, i, fallback).getValue(); });
+}
+function mmul(a, b) {
+	var out = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+	for (var i = 0; i < 3; i++) { for (var j = 0; j < 3; j++) { for (var k = 0; k < 3; k++) { out[i][j] += a[i][k] * b[k][j]; } } }
+	return out;
+}
+function mvec(m, v) { return [0, 1, 2].map(function (i) { return m[i][0] * v[0] + m[i][1] * v[1] + m[i][2] * v[2]; }); }
+function mT(m) { return [[m[0][0], m[1][0], m[2][0]], [m[0][1], m[1][1], m[2][1]], [m[0][2], m[1][2], m[2][2]]]; }
+function axisM(axis, deg) {
+	var c = Math.cos(deg * Math.PI / 180), s = Math.sin(deg * Math.PI / 180);
+	if (axis === "X") { return [[1, 0, 0], [0, c, -s], [0, s, c]]; }
+	if (axis === "Y") { return [[c, 0, s], [0, 1, 0], [-s, 0, c]]; }
+	return [[c, -s, 0], [s, c, 0], [0, 0, 1]];
+}
+function eulerM(angles, order, mode) {
+	var letters = (mode || CONV[0]) === "applied" ? order.split("").reverse() : order.split("");
+	var m = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+	letters.forEach(function (l) { m = mmul(m, axisM(l, angles["XYZ".indexOf(l)])); });
+	return m;
+}
+function quatM(q) {
+	var x = q[0], y = q[1], z = q[2], w = q[3];
+	return [[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+		[2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+		[2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]];
+}
+function boneWorld(d) {
+	var Q = quatM(d.orient || [0, 0, 0, 1]);
+	var E = eulerM(valuesOf(d, "rotation", [0, 0, 0]), d.order || "XYZ");
+	var local = CONV[1] === "qeq" ? mmul(mmul(Q, E), mT(Q)) : mmul(mmul(mT(Q), E), Q);
+	var t = valuesOf(d, "position", [0, 0, 0]);
+	var move = CONV[1] === "qeq" ? mvec(Q, t) : mvec(mT(Q), t);
+	var parent = byId(d.parent);
+	var o = d.origin || [0, 0, 0];
+	var pw, off;
+	if (parent && parent.class === "DzBone") {
+		pw = boneWorld(parent);
+		var po = parent.origin || [0, 0, 0];
+		off = mvec(pw.R, [(o[0] - po[0] + move[0]) * pw.s, (o[1] - po[1] + move[1]) * pw.s, (o[2] - po[2] + move[2]) * pw.s]);
+		return { R: mmul(pw.R, local), P: [pw.P[0] + off[0], pw.P[1] + off[1], pw.P[2] + off[2]], s: pw.s };
+	}
+	var fig = parent ? wrap(parent) : null;
+	var fp = fig ? fig.getWSPos() : new Vec([0, 0, 0]);
+	var fsc = fig ? fig.getWSScale() : 1;
+	var fr = fig ? eulerM(valuesOf(fig.d, "rotation", [0, 0, 0]), "YZX", "applied") : [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+	off = mvec(fr, [(o[0] + move[0]) * fsc, (o[1] + move[1]) * fsc, (o[2] + move[2]) * fsc]);
+	return { R: mmul(fr, local), P: [fp.x + off[0], fp.y + off[1], fp.z + off[2]], s: fsc };
+}
+
 // ------------------------------------------------------------ globals ----
 global.Color = function (r, g, b) { this.red = r; this.green = g; this.blue = b; };
 global.DzVec3 = function (x, y, z) { this.x = x; this.y = y; this.z = z; };
 global.Size = function (w, h) { this.width = w; this.height = h; };
+global.DzTimeRange = function (s, e) { this.start = s; this.end = e; };
 
 function newNode(cls, label, props) {
 	return new Node({ class: cls, label: label, name: label, props: props, position: [0, 0, 0], rotation: [0, 0, 0] });
@@ -465,10 +659,28 @@ global.Scene = {
 	getNumNodes: function () { return state.nodes.length; },
 	getFilename: function () { return state.filename; },
 	needsSave: function () { return !!state.modified; },
-	getTimeStep: function () { return 160; },
-	getAnimRange: function () { return { start: 0, end: (state.endFrame || 0) * 160 }; },
-	getFrame: function () { return state.frame || 0; },
-	setFrame: function (f) { state.frame = f; saveState(); },
+	getTimeStep: function () { return state.timeStep || 160; },
+	setTimeStep: function (s) { state.timeStep = s; changed(); },
+	getAnimRange: function () {
+		var r = state.animRange || [0, (state.endFrame || 0) * Scene.getTimeStep()];
+		return new global.DzTimeRange(r[0], r[1]);
+	},
+	setAnimRange: function (r) {
+		state.animRange = [r.start, r.end];
+		state.endFrame = Math.round(r.end / Scene.getTimeStep());
+		changed();
+	},
+	getPlayRange: function () {
+		var r = state.playRange || state.animRange || [0, (state.endFrame || 0) * Scene.getTimeStep()];
+		return new global.DzTimeRange(r[0], r[1]);
+	},
+	setPlayRange: function (r) { state.playRange = [r.start, r.end]; saveState(); },
+	getTime: function () {
+		return state.time !== undefined && state.time !== null ? state.time : (state.frame || 0) * Scene.getTimeStep();
+	},
+	setTime: function (t) { state.time = t; state.frame = Math.round(t / Scene.getTimeStep()); saveState(); },
+	getFrame: function () { return Math.round(Scene.getTime() / Scene.getTimeStep()); },
+	setFrame: function (f) { Scene.setTime(f * Scene.getTimeStep()); },
 	getPrimarySelection: primary,
 	setPrimarySelection: function (n) { n.select(true); },
 	selectAllNodes: function (on) { state.nodes.forEach(function (n) { n.selected = !!on; }); state.primary = null; saveState(); },
@@ -492,7 +704,9 @@ global.Scene = {
 	removeNode: function (node) {
 		var gone = {};
 		gone[node.d.id] = true;
-		state.nodes.forEach(function (n) { if (n.parent === node.d.id && n.class === "DzBone") { gone[n.id] = true; } });
+		state.nodes.forEach(function (n) {
+			if (n.class === "DzBone" && (n.skel === node.d.id || n.parent === node.d.id)) { gone[n.id] = true; }
+		});
 		if (!byId(node.d.id)) { return false; }
 		state.nodes = state.nodes.filter(function (n) { return !gone[n.id]; });
 		state.nodes.forEach(function (n) {
@@ -511,6 +725,9 @@ global.Scene = {
 			state.nodes = normalize(data.nodes);
 			state.filename = file;
 			state.endFrame = data.endFrame || 0;
+			state.animRange = data.animRange || null;
+			state.timeStep = data.timeStep || 160;
+			state.time = 0;
 			state.modified = false;
 		} else {
 			state.nodes = state.nodes.concat(normalize(data.nodes));
@@ -520,7 +737,8 @@ global.Scene = {
 		return 0;
 	},
 	saveScene: function (file) {
-		fs.writeFileSync(file, JSON.stringify({ nodes: state.nodes, endFrame: state.endFrame }));
+		fs.writeFileSync(file, JSON.stringify({ nodes: state.nodes, endFrame: state.endFrame, animRange: state.animRange,
+			timeStep: state.timeStep }));
 		state.filename = file;
 		state.modified = false;
 		saveState();
@@ -568,8 +786,13 @@ function addFromTemplate(spec, target) {
 	delete base.generation;
 	var node = new Node(base);
 	Scene.addNode(node);
+	var made = {};
 	(bones || []).forEach(function (b) {
-		Scene.addNode(new Node({ class: "DzBone", name: b[0], label: b[1], parent: node.d.id, position: [0, 0, 0], rotation: [0, 0, 0] }));
+		var bone = new Node({ class: "DzBone", name: b[0], label: b[1], parent: (b[2] && made[b[2]]) || node.d.id,
+			skel: node.d.id, position: [0, 0, 0], rotation: [0, 0, 0], origin: b[3] || [0, 0, 0], end: b[4] || null,
+			orient: b[5] || null, order: b[6] || "XYZ" });
+		Scene.addNode(bone);
+		made[b[0]] = bone.d.id;
 	});
 	return node;
 }
@@ -597,6 +820,19 @@ function openContent(file) {
 		Object.keys(fake.pose).forEach(function (bone) {
 			var b = figure.findBone(bone);
 			if (b) { b.d.rotation = fake.pose[bone].slice(); }
+		});
+	}
+	if (fake.animation && figure) {
+		// An animated pose preset: keys from the current frame on.
+		var t0 = Scene.getTime(), step = Scene.getTimeStep();
+		Object.keys(fake.animation).forEach(function (bone) {
+			var b = figure.findBone(bone);
+			if (!b) { return; }
+			fake.animation[bone].forEach(function (k) {
+				["getXRotControl", "getYRotControl", "getZRotControl"].forEach(function (c, i) {
+					b[c]().setValue(t0 + k[0] * step, k[i + 1]);
+				});
+			});
 		});
 	}
 	if (fake.morphs && target) {
@@ -927,7 +1163,7 @@ function makeImporter(cls, ext) {
 			var node = new Node(d);
 			Scene.addNode(node);
 			mesh.bones.forEach(function (b) {
-				Scene.addNode(new Node({ class: "DzBone", name: b, label: b, parent: d.id, position: [0, 0, 0], rotation: [0, 0, 0] }));
+				Scene.addNode(new Node({ class: "DzBone", name: b, label: b, parent: d.id, skel: d.id, position: [0, 0, 0], rotation: [0, 0, 0] }));
 			});
 			return 0;
 		}
@@ -1002,7 +1238,7 @@ global.DzTransferUtility = function () {
 		var out = new Node(d);
 		Scene.addNode(out);
 		src.boneNodes().forEach(function (b) {
-			Scene.addNode(new Node({ class: "DzBone", name: b.d.name, label: b.d.label, parent: d.id, position: [0, 0, 0], rotation: [0, 0, 0] }));
+			Scene.addNode(new Node({ class: "DzBone", name: b.d.name, label: b.d.label, parent: d.id, skel: d.id, position: [0, 0, 0], rotation: [0, 0, 0] }));
 		});
 		cfg.output = out;
 		state.transfers = (state.transfers || []).concat([{ source: src.d.label, target: d.label,

@@ -1,0 +1,29 @@
+// Tool: anim_keys_delete
+// Deletes keyframes of a node. The value at the current frame stays.
+//
+// args:
+//   node        (string, required) label
+//   bones       ([string]) only these bones (with what = bones)
+//   what        ([string]) any of "node", "bones", "morphs" (default all)
+//   start_frame (number) only from this frame
+//   end_frame   (number) only up to this frame
+
+function dazmcpTool(args) {
+	var node = DazMcp.requireNode(args.node, "node");
+	var what = args.what || ["node", "bones", "morphs"];
+	var has = function (w) { return what.indexOf(w) >= 0; };
+	var ch = DazMcp.channels(node, { only_keyed: true, node: has("node"), bones: has("bones"),
+		morphs: has("morphs"), bone_list: args.bones || null });
+	var lo = args.start_frame !== undefined && args.start_frame !== null ? DazMcp.frameTime(args.start_frame) : null;
+	var hi = args.end_frame !== undefined && args.end_frame !== null ? DazMcp.frameTime(args.end_frame) : null;
+	var deleted = 0;
+	var i;
+	for (i = 0; i < ch.length; i++) {
+		if (lo === null && hi === null) { deleted += DazMcp.clearKeys(ch[i].prop); }
+		else { deleted += DazMcp.clearKeys(ch[i].prop, lo === null ? -1e12 : lo, hi === null ? 1e12 : hi); }
+	}
+	var left = DazMcp.channels(node, { only_keyed: true });
+	var keysLeft = 0;
+	for (i = 0; i < left.length; i++) { keysLeft += DazMcp.numKeys(left[i].prop); }
+	return { node: node.getLabel(), keys_deleted: deleted, keys_left: keysLeft };
+}

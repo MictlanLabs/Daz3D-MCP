@@ -1,0 +1,39 @@
+// Tool: anim_skeleton (used by anim_import and anim_foot_contact)
+// The bones of a figure as the retargeting math needs them: parent, origin
+// and end point (cm, figure space, default pose), orientation and rotation
+// order.
+//
+// args:
+//   figure (string, required) label
+
+function dazmcpTool(args) {
+	var fig = DazMcp.requireFigure(args.figure);
+	var bones = DazMcp.bones(fig);
+	var out = [];
+	var i, b, p, o, e, q, parent;
+	for (i = 0; i < bones.length; i++) {
+		b = bones[i];
+		p = b.getNodeParent();
+		parent = p && DazMcp.nodeType(p) === "bone" ? String(p.getName()) : null;
+		o = null; e = null; q = null;
+		try { o = b.getOrigin(); } catch (e1) { o = null; }
+		try { e = b.getEndPoint(); } catch (e2) { e = null; }
+		try { q = b.getOrientation(); } catch (e3) { q = null; }
+		out.push({
+			name: String(b.getName()),
+			label: String(b.getLabel()),
+			parent: parent,
+			origin: o ? [o.x, o.y, o.z] : [0, 0, 0],
+			end: e ? [e.x, e.y, e.z] : null,
+			orientation: q ? [q.x, q.y, q.z, q.w] : [0, 0, 0, 1],
+			rotation_order: DazMcp.rotationOrder(b)
+		});
+	}
+	return {
+		figure: fig.getLabel(),
+		generation: DazMcp.generation(fig),
+		scale: DazMcp.round(fig.getScaleControl().getValue(), 4),
+		fps: DazMcp.fps(),
+		bones: out
+	};
+}

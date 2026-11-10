@@ -13,7 +13,7 @@ from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from daz3d_mcp import __version__, asset_tools, scene_tools
+from daz3d_mcp import __version__, anim_tools, asset_tools, scene_tools
 from daz3d_mcp.client import DazClient
 from daz3d_mcp.paths import config_dir
 from daz3d_mcp.skills import get_skill, list_skills
@@ -31,8 +31,13 @@ light_create and environment_set set up the shot; render makes the final image.
 Content from other stores: package_inspect and package_install put a .zip into
 a content library; import_mesh brings in loose OBJ/FBX models;
 wearable_from_mesh makes an imported garment follow a figure.
+Animation: anim_keys_set keys poses at frames (anim_timeline sets the frame
+rate and range); anim_preset_apply plays saved or built-in motions;
+anim_import brings Mixamo FBX or mocap BVH onto a Genesis figure; anim_retime
+and anim_offset change speed, timing and place; anim_foot_contact and
+anim_preview check the result.
 If your client has no skills, read the guides with daz_guide first: daz-basics,
-then scene-building, characters, rendering and third-party-assets.
+then scene-building, characters, rendering, third-party-assets and animation.
 run_script runs free DazScript (ES5 JavaScript) for anything the named tools
 do not cover; prefer the named tools when they exist.
 """
@@ -174,6 +179,7 @@ def create_server(client: DazClient | None = None) -> FastMCP:
 
     forget_index = scene_tools.register(mcp, call, get_client)
     asset_tools.register(mcp, call, get_client, forget_index)
+    anim_tools.register(mcp, call, get_client)
 
     for skill in list_skills():
         _register_skill(mcp, skill.name, skill.description)

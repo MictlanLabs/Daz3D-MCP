@@ -1,0 +1,34 @@
+// Tool: anim_preset_load
+// Applies an animated pose preset from the content library (a .duf saved by
+// Daz with animation, or aniBlock-free "animation" presets) to a figure,
+// starting at a frame. Daz applies the keys from the current frame on.
+//
+// args:
+//   path   (string, required) absolute path of the .duf/.dsf
+//   figure (string, required) label
+//   frame  (number, default 0) first frame
+
+function dazmcpTool(args) {
+	var fig = DazMcp.requireFigure(args.figure);
+	if (!args.path || !DazMcp.fileExists(args.path)) { throw DazMcp.fail("not_found", "File not found: " + args.path); }
+	var keep = Scene.getTime();
+	var before = DazMcp.keyRange(DazMcp.channels(fig, { only_keyed: true }));
+	Scene.setTime(DazMcp.frameTime(args.frame || 0));
+	DazMcp.selectOnly(fig);
+	var ok = App.getContentMgr().openFile(args.path, true);
+	Scene.setTime(keep);
+	if (ok === false) { throw DazMcp.fail("load_failed", "Daz Studio could not load " + args.path + "."); }
+	var ch = DazMcp.channels(fig, { only_keyed: true });
+	var kr = DazMcp.keyRange(ch);
+	var out = { figure: fig.getLabel(), loaded: args.path, start_frame: args.frame || 0, animated_channels: ch.length };
+	if (kr) {
+		out.first_frame = DazMcp.timeFrame(kr.start);
+		out.last_frame = DazMcp.timeFrame(kr.end);
+		DazMcp.extendRange(Math.ceil(out.last_frame));
+	}
+	if (!kr || (before && kr.start === before.start && kr.end === before.end)) {
+		out.warning = "No new keys appeared: the file may be a still pose. Use content_load for poses, then " +
+			"anim_key_pose to key it.";
+	}
+	return out;
+}

@@ -197,7 +197,8 @@ def _read_props(data: bytes, pos: int, count: int, want_arrays: bool) -> tuple[l
     return props, pos
 
 
-def _read_binary(data: bytes) -> list[_FbxNode]:
+def _read_binary(data: bytes, wanted: set[str] | frozenset[str] = frozenset(_WANTED_ARRAYS)) -> list[_FbxNode]:
+    """The node tree of a binary FBX; arrays are decoded only for nodes named in wanted."""
     version = struct.unpack_from("<I", data, 23)[0]
     wide = version >= 7500
     head = 25 if wide else 13
@@ -212,7 +213,7 @@ def _read_binary(data: bytes) -> list[_FbxNode]:
             return None, pos + head
         name = data[pos + head:pos + head + name_len].decode("ascii", "replace")
         p = pos + head + name_len
-        props, p = _read_props(data, p, nprops, name in _WANTED_ARRAYS)
+        props, p = _read_props(data, p, nprops, name in wanted)
         children = []
         while p < end:
             child, p = node(p)

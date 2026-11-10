@@ -1,0 +1,73 @@
+// Tool: anim_retime
+// Changes the speed (rhythm) of a node's animation: stretches or squeezes its
+// keys in time. Keys after the stretched part move with it.
+//
+// args:
+//   node        (string, required) label
+//   speed       (number) 2 = twice as fast (half the frames), 0.5 = half speed
+//   length      (number) or: how many frames the part should last
+//   start_frame (number) first frame of the part (default its first key)
+//   end_frame   (number) last frame of the part (default its last key)
+//   snap        (bool, default true) put keys on whole frames
+//   with_followers (bool) also retime clothing and hair fitted to the figure
+
+function nodesFor(node, withFollowers) {
+	var list = [node];
+	if (withFollowers === true) { list = list.concat(DazMcp.followers(node)); }
+	return list;
+}
+
+function dazmcpTool(args) {
+	var node = DazMcp.requireNode(args.node, "node");
+	var nodes = nodesFor(node, args.with_followers);
+	var ch = [];
+	var i, n;
+	for (n = 0; n < nodes.length; n++) { ch = ch.concat(DazMcp.channels(nodes[n], { only_keyed: true })); }
+	if (!ch.length) { throw DazMcp.fail("not_animated", node.getLabel() + " has no keyframes to retime."); }
+	var kr = DazMcp.keyRange(ch);
+	var step = Scene.getTimeStep();
+	var s = args.start_frame !== undefined && args.start_frame !== null ? DazMcp.frameTime(args.start_frame) : kr.start;
+	var e = args.end_frame !== undefined && args.end_frame !== null ? DazMcp.frameTime(args.end_frame) : kr.end;
+	if (e <= s) { throw DazMcp.fail("bad_args", "The part to retime is empty (end_frame must be after start_frame)."); }
+	var newLen;
+	if (args.length !== undefined && args.length !== null) {
+		if (!(args.length > 0)) { throw DazMcp.fail("bad_args", "length must be above 0 frames."); }
+		newLen = args.length * step;
+	} else if (args.speed !== undefined && args.speed !== null) {
+		if (!(args.speed > 0)) { throw DazMcp.fail("bad_args", "speed must be above 0."); }
+		newLen = (e - s) / args.speed;
+	} else {
+		throw DazMcp.fail("bad_args", "Give speed or length.");
+	}
+	var factor = newLen / (e - s);
+	var snap = args.snap !== false;
+	var map = function (t) {
+		var out;
+		if (t < s) { out = t; }
+		else if (t <= e) { out = s + (t - s) * factor; }
+		else { out = t + (newLen - (e - s)); }
+		return snap ? Math.round(out / step) * step : out;
+	};
+	var moved = 0;
+	for (i = 0; i < ch.length; i++) { moved += DazMcp.remapKeys(ch[i].prop, map); }
+
+	var range = Scene.getAnimRange();
+	var after = DazMcp.keyRange(ch);
+	var fitted = false;
+	if (Math.abs(range.end - kr.end) < step / 2 || after.end > range.end) {
+		Scene.setAnimRange(new DzTimeRange(range.start, after.end));
+		try { Scene.setPlayRange(new DzTimeRange(range.start, after.end)); } catch (e1) { /* older API */ }
+		fitted = true;
+	}
+	return {
+		node: node.getLabel(),
+		nodes: DazMcp.labels(nodes),
+		part: [DazMcp.timeFrame(s), DazMcp.timeFrame(e)],
+		new_part: [DazMcp.timeFrame(s), DazMcp.timeFrame(s + newLen)],
+		speed: DazMcp.round(1 / factor, 4),
+		keys_moved: moved,
+		first_frame: DazMcp.timeFrame(after.start),
+		last_frame: DazMcp.timeFrame(after.end),
+		range_updated: fitted
+	};
+}

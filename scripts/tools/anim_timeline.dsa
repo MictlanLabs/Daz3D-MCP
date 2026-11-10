@@ -1,0 +1,85 @@
+// Tool: anim_timeline
+// Reads and sets the scene timeline: frame rate, animation range and the
+// current frame. Lists what is animated.
+//
+// args:
+//   fps          (number) new frame rate
+//   keep         (string) with fps: "duration" (default) keeps every key at its
+//                time in seconds, so the animation lasts the same; "frames"
+//                keeps every key on its frame number, so it plays faster/slower
+//   start_frame  (int) first frame of the animation range
+//   end_frame    (int) last frame of the animation range
+//   frame        (int) go to this frame
+//   list_animated (bool, default true) list the animated nodes
+
+function dazmcpTool(args) {
+	var range, oldStep, newStep, all, i, j, ch, moved, factor, r, info;
+	if (args.fps !== undefined && args.fps !== null) {
+		if (!(args.fps > 0 && args.fps <= 1000)) { throw DazMcp.fail("bad_args", "fps must be between 0 and 1000."); }
+		oldStep = Scene.getTimeStep();
+		newStep = Math.round(DazMcp.TICKS_PER_SECOND / args.fps);
+		range = Scene.getAnimRange();
+		moved = 0;
+		if (args.keep === "frames" && newStep !== oldStep) {
+			factor = newStep / oldStep;
+			all = Scene.getNodeList();
+			for (i = 0; i < all.length; i++) {
+				if (DazMcp.nodeType(all[i]) === "bone") { continue; }
+				ch = DazMcp.channels(all[i], { only_keyed: true });
+				for (j = 0; j < ch.length; j++) {
+					moved += DazMcp.remapKeys(ch[j].prop, function (t) { return t * factor; });
+				}
+			}
+			Scene.setTimeStep(newStep);
+			Scene.setAnimRange(new DzTimeRange(Math.round(range.start * factor), Math.round(range.end * factor)));
+		} else {
+			Scene.setTimeStep(newStep);
+		}
+	}
+	if (args.start_frame !== undefined || args.end_frame !== undefined) {
+		range = Scene.getAnimRange();
+		var s = args.start_frame !== undefined && args.start_frame !== null ? DazMcp.frameTime(args.start_frame) : range.start;
+		var e = args.end_frame !== undefined && args.end_frame !== null ? DazMcp.frameTime(args.end_frame) : range.end;
+		if (e < s) { throw DazMcp.fail("bad_args", "end_frame must not be before start_frame."); }
+		Scene.setAnimRange(new DzTimeRange(s, e));
+		try { Scene.setPlayRange(new DzTimeRange(s, e)); } catch (e1) { /* older API */ }
+	}
+	if (args.frame !== undefined && args.frame !== null) {
+		Scene.setTime(DazMcp.frameTime(args.frame));
+	}
+
+	r = Scene.getAnimRange();
+	info = {
+		fps: DazMcp.fps(),
+		ticks_per_frame: Scene.getTimeStep(),
+		start_frame: DazMcp.timeFrame(r.start),
+		end_frame: DazMcp.timeFrame(r.end),
+		frame: DazMcp.timeFrame(Scene.getTime()),
+		seconds: DazMcp.round((r.end - r.start) / DazMcp.TICKS_PER_SECOND, 3)
+	};
+	if (moved) { info.keys_moved = moved; }
+	if (args.list_animated !== false) {
+		info.animated = [];
+		all = Scene.getNodeList();
+		for (i = 0; i < all.length && info.animated.length < 100; i++) {
+			if (DazMcp.nodeType(all[i]) === "bone") { continue; }
+			ch = DazMcp.channels(all[i], { only_keyed: true });
+			if (!ch.length) { continue; }
+			var kr = DazMcp.keyRange(ch);
+			var bonesKeyed = {};
+			for (j = 0; j < ch.length; j++) { if (ch[j].group === "bones") { bonesKeyed[ch[j].item] = true; } }
+			var nb = 0;
+			for (j in bonesKeyed) { if (bonesKeyed.hasOwnProperty(j)) { nb++; } }
+			info.animated.push({ label: all[i].getLabel(), type: DazMcp.nodeType(all[i]), channels: ch.length,
+				bones: nb, first_frame: DazMcp.timeFrame(kr.start), last_frame: DazMcp.timeFrame(kr.end) });
+		}
+		var last = null;
+		for (i = 0; i < info.animated.length; i++) {
+			last = last === null ? info.animated[i].last_frame : Math.max(last, info.animated[i].last_frame);
+		}
+		if (last !== null && last > info.end_frame) {
+			info.warning = "Keys go past the end of the range (frame " + last + "); set end_frame to see them.";
+		}
+	}
+	return info;
+}

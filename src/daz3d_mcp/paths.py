@@ -26,10 +26,15 @@ def data_dir(kind: str) -> Path:
     In a built wheel the data lives in daz3d_mcp/_data; when running from a
     checkout it is read straight from the top of the repository.
     """
+    root = _repo_root()
+    local = root / kind
+    # A checkout (also an editable install, which keeps a stale copy in
+    # _data) reads the repository's own files, so edits apply at once.
+    if (root / "pyproject.toml").is_file() and local.is_dir():
+        return local
     packaged = Path(str(resources.files("daz3d_mcp"))) / "_data" / kind
     if packaged.is_dir():
         return packaged
-    local = _repo_root() / kind
     if local.is_dir():
         return local
     raise FileNotFoundError(f"Daz3D-MCP data folder '{kind}' is missing from the installation.")
@@ -41,3 +46,8 @@ def scripts_dir() -> Path:
 
 def skills_dir() -> Path:
     return data_dir("skills")
+
+
+def animations_dir() -> Path:
+    """Built-in animation presets (.json clips)."""
+    return data_dir("animations")

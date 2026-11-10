@@ -4,16 +4,18 @@ Let AI agents (Claude Code, Codex, Cursor, Antigravity, Gemini CLI, Claude
 Desktop, VS Code and any other MCP client) control **Daz Studio**: open and
 save scenes, find installed content, build characters (shape, clothing, hair,
 poses), set up cameras, lights and materials, render with Iray, install content
-from other stores, import OBJ and FBX models, and run DazScript.
+from other stores, import OBJ and FBX models, animate figures (keyframes,
+presets, Mixamo FBX and mocap BVH), and run DazScript.
 
 > Independent open source project. Not affiliated with or endorsed by Daz 3D.
 > [Leer en español](README.es.md)
 
-**Status: v0.3 (stage 3 of 4).** Scenes, content library, characters, cameras,
-lights, materials, rendering and third-party assets (store packages, OBJ/FBX
-import, turning imported meshes into clothing) work. Animation comes in the
-next stage. Stages 1 to 3 are tested against a simulated Daz Studio; their
-closing tests on a real Daz Studio 6 are still pending.
+**Status: v0.4 (stage 4 of 4).** Scenes, content library, characters, cameras,
+lights, materials, rendering, third-party assets (store packages, OBJ/FBX
+import, turning imported meshes into clothing) and animation (keyframes,
+presets, BVH and FBX import with bone mapping, moving and retiming) work.
+All four stages are tested against a simulated Daz Studio; their closing
+tests on a real Daz Studio 6 are still pending.
 
 ## How it works
 
@@ -90,6 +92,15 @@ It is slower but needs nothing compiled.
 | `mesh_inspect` / `import_mesh` | Reads an OBJ or FBX (size, units, textures) / imports it at the right size, without dialogs |
 | `wearable_from_mesh` | Turns an imported garment into clothing that follows a figure (Transfer Utility) |
 | `wearable_adjust` | Mesh smoothing and collision of clothing (fixes skin poking through) |
+| `anim_timeline` | Frame rate, frame range, current frame, and what is animated |
+| `anim_keys_set` / `anim_keys_get` / `anim_keys_delete` | Keyframes on bones, the hip, nodes, morphs and any number property |
+| `anim_key_pose` | Keys the current pose (from `pose_bones` or a pose preset) at some frames |
+| `anim_sample` | World positions of bones at some frames, to check a motion |
+| `anim_preview` | Viewport images of several frames |
+| `anim_foot_contact` | Finds feet through the floor, floating and sliding; can fix the hip height |
+| `anim_retime` / `anim_offset` | Faster, slower or a set length / later, moved, turned or put on a spot |
+| `anim_preset_list` / `anim_preset_save` / `anim_preset_apply` | Animation presets: built-in, your own (looping, repeated) and bought .duf ones |
+| `anim_file_inspect` / `anim_import` | Reads a BVH or binary FBX (Mixamo, CMU...) and adapts it to a Genesis figure with a bone map |
 | `camera_create` / `camera_set` | Adds or changes a camera; can frame nodes automatically |
 | `light_create` / `light_set` | Adds or changes spot, point and distant lights |
 | `environment_set` | Iray dome, HDRI and sun-sky |
@@ -99,13 +110,15 @@ It is slower but needs nothing compiled.
 | `run_script` | Runs DazScript for anything else (can be disabled) |
 | `daz_guide` | Returns the skills as text for agents without skills support |
 
-Skills: `daz-basics`, `scene-building`, `characters`, `rendering`, `third-party-assets`.
+Skills: `daz-basics`, `scene-building`, `characters`, `rendering`, `third-party-assets`, `animation`.
 
 Try it: *"Open ~/Documents/scene.duf in Daz, describe the scene and show me a capture."*
 Or: *"Build a scene with two Genesis 9 characters, dressed and posed, talking
 to each other, and render it."*
 Or: *"Install ~/Downloads/jacket.zip, dress Ana with it, then import
 ~/Downloads/cape.fbx and make it clothing that follows her."*
+Or: *"Make Ana walk four steps toward the camera, then put
+~/Downloads/Dancing.fbx from Mixamo on Leo starting at frame 60."*
 
 Content search runs in the MCP server on an index of the library files
 (`~/.daz3d-mcp/content-index.json`, rebuilt every 24 hours or with
@@ -127,6 +140,7 @@ Content search runs in the MCP server on an index of the library files
 | `content_index_max_age_hours` | `24` | When to rebuild the content index |
 | `install_library` | `~/Documents/DAZ 3D/Third Party Library` | Where `package_install` puts packages |
 | `max_package_gb` | `20` | Largest package (unpacked) `package_install` accepts |
+| `rotation_convention` | measured | How Daz turns bones; the first `anim_import` measures it and caches it in `~/.daz3d-mcp/animation.json` |
 
 ## Security
 

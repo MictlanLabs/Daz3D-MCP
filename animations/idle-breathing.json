@@ -1,0 +1,130 @@
+{
+ "format": "daz3d-mcp-clip",
+ "version": 1,
+ "name": "idle-breathing",
+ "description": "Standing idle: slow breathing in the chest and a slight head drift. Loops; repeat it for longer idles. Works on any pose.",
+ "generation": "Genesis 9",
+ "fps": 30,
+ "frames": 60,
+ "loop": true,
+ "tracks": {
+  "bones": {
+   "spine2": {
+    "rotation": [
+     [
+      0,
+      0,
+      0,
+      0
+     ],
+     [
+      30,
+      1.2,
+      0,
+      0
+     ],
+     [
+      60,
+      0,
+      0,
+      0
+     ]
+    ]
+   },
+   "spine3": {
+    "rotation": [
+     [
+      0,
+      0,
+      0,
+      0
+     ],
+     [
+      30,
+      -1.5,
+      0,
+      0
+     ],
+     [
+      60,
+      0,
+      0,
+      0
+     ]
+    ]
+   },
+   "spine4": {
+    "rotation": [
+     [
+      0,
+      0,
+      0,
+      0
+     ],
+     [
+      30,
+      -1.0,
+      0,
+      0
+     ],
+     [
+      60,
+      0,
+      0,
+      0
+     ]
+    ]
+   },
+   "neck1": {
+    "rotation": [
+     [
+      0,
+      0,
+      0,
+      0
+     ],
+     [
+      30,
+      0.8,
+      1.0,
+      0
+     ],
+     [
+      60,
+      0,
+      0,
+      0
+     ]
+    ]
+   },
+   "head": {
+    "rotation": [
+     [
+      0,
+      0,
+      0,
+      0
+     ],
+     [
+      20,
+      0.5,
+      -1.5,
+      0.5
+     ],
+     [
+      45,
+      -0.5,
+      1.0,
+      -0.5
+     ],
+     [
+      60,
+      0,
+      0,
+      0
+     ]
+    ]
+   }
+  }
+ }
+}

@@ -1,0 +1,85 @@
+// Tool: anim_keys_get
+// Reads the keyframes of a node, as the same tracks anim_keys_set takes.
+//
+// args:
+//   node        (string, required) label
+//   bones       ([string]) only these bones
+//   start_frame (number) only keys from this frame
+//   end_frame   (number) only keys up to this frame
+//   summary     (bool) only counts and frame ranges, not the keys
+//   morphs      (bool, default true) include shape dials
+//   max_keys    (int, default 20000) stop reading after this many keys
+
+function dazmcpTool(args) {
+	var node = DazMcp.requireNode(args.node, "node");
+	var ch = DazMcp.channels(node, { only_keyed: true, bone_list: args.bones || null, morphs: args.morphs !== false });
+	var lo = args.start_frame !== undefined && args.start_frame !== null ? DazMcp.frameTime(args.start_frame) : -1e12;
+	var hi = args.end_frame !== undefined && args.end_frame !== null ? DazMcp.frameTime(args.end_frame) : 1e12;
+	var max = args.max_keys || 20000;
+	var groups = {};
+	var total = 0;
+	var truncated = false;
+	var i, j, c, keys, id, g;
+	// Gather key times per item+kind (x, y and z share rows).
+	for (i = 0; i < ch.length; i++) {
+		c = ch[i];
+		id = c.group + "\u0001" + c.item + "\u0001" + c.kind;
+		g = groups[id];
+		if (!g) { g = groups[id] = { group: c.group, item: c.item, kind: c.kind, props: [], times: {} }; }
+		g.props[c.axis] = c.prop;
+		keys = DazMcp.readKeys(c.prop);
+		for (j = 0; j < keys.length; j++) {
+			if (keys[j][0] < lo || keys[j][0] > hi) { continue; }
+			g.times[keys[j][0]] = true;
+		}
+	}
+	var tracks = { node: {}, bones: {}, morphs: {} };
+	var summary = { channels: ch.length, keys: 0, bones: [], morphs: [], node: [] };
+	var first = null;
+	var last = null;
+	for (id in groups) {
+		if (!groups.hasOwnProperty(id)) { continue; }
+		g = groups[id];
+		var times = [];
+		for (j in g.times) { if (g.times.hasOwnProperty(j)) { times.push(Number(j)); } }
+		if (!times.length) { continue; }
+		times.sort(function (a, b) { return a - b; });
+		first = first === null ? times[0] : Math.min(first, times[0]);
+		last = last === null ? times[times.length - 1] : Math.max(last, times[times.length - 1]);
+		var width = g.kind === "position" || g.kind === "rotation" ? 3 : 1;
+		total += times.length;
+		if (g.group === "bones" && summary.bones.indexOf(g.item) < 0) { summary.bones.push(g.item); }
+		if (g.group === "morphs") { summary.morphs.push(g.item); }
+		if (g.group === "node") { summary.node.push(g.kind); }
+		if (args.summary === true) { continue; }
+		if (total > max) { truncated = true; continue; }
+		var rows = [];
+		for (j = 0; j < times.length; j++) {
+			var row = [DazMcp.timeFrame(times[j])];
+			var a;
+			for (a = 0; a < width; a++) {
+				row.push(g.props[a] ? DazMcp.round(DazMcp.valueAt(g.props[a], times[j]), 4) : null);
+			}
+			rows.push(row);
+		}
+		if (g.group === "node") { tracks.node[g.kind] = rows; }
+		else if (g.group === "morphs") { tracks.morphs[g.item] = rows; }
+		else {
+			if (!tracks.bones[g.item]) { tracks.bones[g.item] = {}; }
+			tracks.bones[g.item][g.kind] = rows;
+		}
+	}
+	summary.keys = total;
+	var out = {
+		node: node.getLabel(),
+		type: DazMcp.nodeType(node),
+		fps: DazMcp.fps(),
+		first_frame: first === null ? null : DazMcp.timeFrame(first),
+		last_frame: last === null ? null : DazMcp.timeFrame(last),
+		summary: summary
+	};
+	if (args.summary !== true) { out.tracks = tracks; }
+	if (truncated) { out.truncated = true; out.hint = "Too many keys: ask for fewer bones or a frame range."; }
+	if (DazMcp.nodeType(node) === "figure") { out.generation = DazMcp.generation(node); }
+	return out;
+}

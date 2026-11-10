@@ -4,18 +4,19 @@ Permite que agentes de IA (Claude Code, Codex, Cursor, Antigravity, Gemini CLI,
 Claude Desktop, VS Code y cualquier cliente MCP) controlen **Daz Studio**:
 abrir y guardar escenas, buscar el contenido instalado, crear personajes
 (forma, ropa, pelo, poses), preparar cámaras, luces y materiales, renderizar con
-Iray, instalar contenido de otras tiendas, importar modelos OBJ y FBX y ejecutar
-DazScript.
+Iray, instalar contenido de otras tiendas, importar modelos OBJ y FBX, animar
+figuras (keyframes, presets, FBX de Mixamo y BVH de captura de movimiento) y
+ejecutar DazScript.
 
 > Proyecto open source independiente. No está afiliado ni respaldado por Daz 3D.
 > [Read in English](README.md)
 
-**Estado: v0.3 (etapa 3 de 4).** Funcionan escenas, biblioteca de contenido,
-personajes, cámaras, luces, materiales, render y assets de terceros (paquetes
-de otras tiendas, importar OBJ/FBX y convertir mallas importadas en ropa). La
-animación llega en la siguiente etapa. Las etapas 1 a 3 están probadas contra
-un Daz Studio simulado; sus pruebas de cierre en un Daz Studio 6 real siguen
-pendientes.
+**Estado: v0.4 (etapa 4 de 4).** Funcionan escenas, biblioteca de contenido,
+personajes, cámaras, luces, materiales, render, assets de terceros (paquetes
+de otras tiendas, importar OBJ/FBX y convertir mallas importadas en ropa) y
+animación (keyframes, presets, importar BVH y FBX con mapa de huesos, reubicar
+y cambiar el ritmo). Las cuatro etapas están probadas contra un Daz Studio
+simulado; sus pruebas de cierre en un Daz Studio 6 real siguen pendientes.
 
 ## Cómo funciona
 
@@ -93,6 +94,15 @@ script. Es más lento pero no necesita compilar nada.
 | `mesh_inspect` / `import_mesh` | Lee un OBJ o FBX (tamaño, unidades, texturas) / lo importa al tamaño correcto, sin diálogos |
 | `wearable_from_mesh` | Convierte una prenda importada en ropa que sigue a una figura (Transfer Utility) |
 | `wearable_adjust` | Suavizado y colisión de la ropa (corrige la piel que atraviesa la tela) |
+| `anim_timeline` | Fotogramas por segundo, rango, frame actual y qué está animado |
+| `anim_keys_set` / `anim_keys_get` / `anim_keys_delete` | Keyframes en huesos, cadera, nodos, morphs y cualquier propiedad numérica |
+| `anim_key_pose` | Pone keys de la pose actual (de `pose_bones` o un preset de pose) en unos frames |
+| `anim_sample` | Posición en el mundo de los huesos en unos frames, para revisar un movimiento |
+| `anim_preview` | Imágenes del viewport de varios frames |
+| `anim_foot_contact` | Detecta pies que atraviesan el piso, flotan o resbalan; puede corregir la altura de la cadera |
+| `anim_retime` / `anim_offset` | Más rápido, más lento o a una duración / más tarde, movido, girado o en un punto |
+| `anim_preset_list` / `anim_preset_save` / `anim_preset_apply` | Presets de animación: incluidos, propios (en bucle, repetidos) y .duf comprados |
+| `anim_file_inspect` / `anim_import` | Lee un BVH o FBX binario (Mixamo, CMU...) y lo adapta a una figura Genesis con un mapa de huesos |
 | `camera_create` / `camera_set` | Crea o cambia una cámara; puede encuadrar nodos sola |
 | `light_create` / `light_set` | Crea o cambia luces spot, point y distant |
 | `environment_set` | Domo de Iray, HDRI y sol-cielo |
@@ -102,13 +112,15 @@ script. Es más lento pero no necesita compilar nada.
 | `run_script` | Ejecuta DazScript para todo lo demás (se puede desactivar) |
 | `daz_guide` | Devuelve las skills como texto para agentes sin soporte de skills |
 
-Skills: `daz-basics`, `scene-building`, `characters`, `rendering`, `third-party-assets`.
+Skills: `daz-basics`, `scene-building`, `characters`, `rendering`, `third-party-assets`, `animation`.
 
 Pruébalo: *"Abre ~/Documents/escena.duf en Daz, describe la escena y muéstrame una captura."*
 O: *"Monta una escena con dos personajes Genesis 9, vestidos y posados,
 conversando, y renderízala."*
 O: *"Instala ~/Downloads/chaqueta.zip, viste a Ana con ella, luego importa
 ~/Downloads/capa.fbx y conviértela en ropa que la siga."*
+O: *"Haz que Ana camine cuatro pasos hacia la cámara y luego pon en Leo
+~/Downloads/Dancing.fbx de Mixamo desde el frame 60."*
 
 La búsqueda de contenido corre en el servidor MCP sobre un índice de los
 archivos de la biblioteca (`~/.daz3d-mcp/content-index.json`, se reconstruye
@@ -131,6 +143,7 @@ Daz Studio.
 | `content_index_max_age_hours` | `24` | Cada cuánto se reconstruye el índice de contenido |
 | `install_library` | `~/Documents/DAZ 3D/Third Party Library` | Dónde instala `package_install` los paquetes |
 | `max_package_gb` | `20` | Paquete más grande (descomprimido) que acepta `package_install` |
+| `rotation_convention` | medida | Cómo gira Daz los huesos; el primer `anim_import` la mide y la guarda en `~/.daz3d-mcp/animation.json` |
 
 ## Seguridad
 

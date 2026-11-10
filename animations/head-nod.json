@@ -1,0 +1,82 @@
+{
+ "format": "daz3d-mcp-clip",
+ "version": 1,
+ "name": "head-nod",
+ "description": "A yes nod: the head dips twice and comes back. 1 second.",
+ "generation": "Genesis 9",
+ "fps": 30,
+ "frames": 30,
+ "loop": false,
+ "tracks": {
+  "bones": {
+   "neck2": {
+    "rotation": [
+     [
+      0,
+      0,
+      0,
+      0
+     ],
+     [
+      8,
+      5,
+      0,
+      0
+     ],
+     [
+      16,
+      -1,
+      0,
+      0
+     ],
+     [
+      22,
+      3,
+      0,
+      0
+     ],
+     [
+      30,
+      0,
+      0,
+      0
+     ]
+    ]
+   },
+   "head": {
+    "rotation": [
+     [
+      0,
+      0,
+      0,
+      0
+     ],
+     [
+      8,
+      12,
+      0,
+      0
+     ],
+     [
+      16,
+      -3,
+      0,
+      0
+     ],
+     [
+      22,
+      8,
+      0,
+      0
+     ],
+     [
+      30,
+      0,
+      0,
+      0
+     ]
+    ]
+   }
+  }
+ }
+}

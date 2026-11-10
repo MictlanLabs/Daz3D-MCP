@@ -1,0 +1,60 @@
+// Tool: anim_sample
+// World positions (cm) of bones at some frames, and optionally their dial
+// values, as Daz computes them. The current frame is put back afterwards.
+//
+// args:
+//   figure     (string, required) label (a prop or camera works without bones)
+//   frames     ([number], required)
+//   bones      ([string]) bones to report (default: none; the node's own position is always there)
+//   dial_bones ([string]) bones whose rotation and translation dials to report
+
+function dazmcpTool(args) {
+	var node = DazMcp.requireNode(args.figure, "figure");
+	var isFig = DazMcp.inherits(node, "DzSkeleton");
+	var fig = isFig ? node : null;
+	var frames = args.frames || [];
+	var keep = Scene.getTime();
+	var list = [];
+	var dials = [];
+	var missing = [];
+	var i, f, b, p, out, row, rot, pos;
+	if (!frames.length) { throw DazMcp.fail("bad_args", "frames is required."); }
+	if (frames.length > 2000) { throw DazMcp.fail("bad_args", "At most 2000 frames at a time."); }
+	var find = function (names, into) {
+		for (i = 0; i < (names || []).length; i++) {
+			b = fig ? DazMcp.findBone(fig, names[i]) : null;
+			if (b) { into.push(b); } else if (missing.indexOf(names[i]) < 0) { missing.push(names[i]); }
+		}
+	};
+	find(args.bones, list);
+	find(args.dial_bones, dials);
+	out = { figure: node.getLabel(), frames: {} };
+	try {
+		for (f = 0; f < frames.length; f++) {
+			Scene.setTime(DazMcp.frameTime(frames[f]));
+			p = node.getWSPos();
+			row = { node: [DazMcp.round(p.x, 2), DazMcp.round(p.y, 2), DazMcp.round(p.z, 2)], bones: {} };
+			for (i = 0; i < list.length; i++) {
+				p = list[i].getWSPos();
+				row.bones[String(list[i].getName())] = [DazMcp.round(p.x, 2), DazMcp.round(p.y, 2), DazMcp.round(p.z, 2)];
+			}
+			if (dials.length) {
+				row.dials = {};
+				for (i = 0; i < dials.length; i++) {
+					rot = DazMcp.transformControls(dials[i], "rotation");
+					pos = DazMcp.transformControls(dials[i], "position");
+					row.dials[String(dials[i].getName())] = {
+						rotation: [DazMcp.round(rot[0].getValue(), 3), DazMcp.round(rot[1].getValue(), 3), DazMcp.round(rot[2].getValue(), 3)],
+						position: [DazMcp.round(pos[0].getValue(), 3), DazMcp.round(pos[1].getValue(), 3), DazMcp.round(pos[2].getValue(), 3)]
+					};
+				}
+			}
+			out.frames[String(frames[f])] = row;
+		}
+	} finally {
+		Scene.setTime(keep);
+	}
+	out.scale = DazMcp.round(node.getScaleControl().getValue(), 4);
+	if (missing.length) { out.not_found = missing; }
+	return out;
+}

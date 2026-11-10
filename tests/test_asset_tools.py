@@ -88,7 +88,7 @@ def test_mesh_to_clothing(client, bridge, tmp_path):
 
     res = client.run_tool("wearable_from_mesh", {"item": "Cape", "figure": "Ana"})
     assert res["fitted_to"] == "Ana" and res["type"] == "fitted_figure"
-    assert res["bones"] == 22 and res["morphs"] > 0 and res["smoothing"] is True
+    assert res["bones"] == 25 and res["morphs"] > 0 and res["smoothing"] is True
     t = state(bridge)["transfers"][-1]
     assert t["content_type"] == "Follower/Wardrobe" and t["morphs"] is True and t["base"] == "base"
     labels = [n["label"] for n in client.run_tool("scene_info")["nodes"]]
