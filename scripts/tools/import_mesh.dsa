@@ -1,0 +1,174 @@
+// Tool: import_mesh
+// Imports an OBJ or FBX file into the scene without showing the importer's
+// options dialog, then names, sizes and places what it added.
+//
+// args:
+//   path          (string, required) absolute path of the .obj or .fbx
+//   format        (string) "obj" or "fbx" (from the extension when missing)
+//   scale_cm      (number) OBJ: centimeters per file unit (importer "Scale")
+//   up_axis       (string) OBJ: "Y" (default) or "Z" for Z-up files
+//   post_scale    (number) multiply the imported node's scale (FBX unit fixes)
+//   height        (number) cm; scale it uniformly to this height
+//   label         (string) label for the imported node
+//   position      [x, y, z] cm
+//   drop_to_floor (bool) put its lowest point at Y = 0
+//   take          (string) FBX: animation take to read
+//   options       {key: value} extra importer settings (DzFileIOSettings)
+
+var IMPORTERS = { obj: "DzObjImporter", fbx: "DzFbxImporter" };
+
+function setOption(settings, key, value) {
+	if (typeof value === "boolean") { settings.setBoolValue(key, value); }
+	else if (typeof value === "number") {
+		if (Math.floor(value) === value && Math.abs(value) < 1e9) { settings.setIntValue(key, value); }
+		else { settings.setFloatValue(key, value); }
+	} else { settings.setStringValue(key, String(value)); }
+}
+
+function findImporter(format, path) {
+	var mgr = App.getImportMgr();
+	var imp = null;
+	try { imp = mgr.findImporterByClassName(IMPORTERS[format]); } catch (e) { imp = null; }
+	if (!imp) { try { imp = mgr.findImporter(path); } catch (e2) { imp = null; } }
+	return imp;
+}
+
+function dazmcpTool(args) {
+	var path = args.path;
+	var format = DazMcp.lower(args.format || String(path).replace(/^.*\./, ""));
+	var importer, settings, before, err, added, roots, root, i, key, box, warnings, f, p, s, h;
+	if (!path) { throw DazMcp.fail("bad_args", "path is required."); }
+	if (!DazMcp.fileExists(path)) { throw DazMcp.fail("not_found", "File not found: " + path); }
+	if (!IMPORTERS[format]) { throw DazMcp.fail("bad_args", "Daz Studio imports .obj and .fbx files, not ." + format + "."); }
+	importer = findImporter(format, path);
+	if (!importer) { throw DazMcp.fail("no_importer", "Daz Studio has no " + format.toUpperCase() + " importer."); }
+
+	settings = new DzFileIOSettings();
+	try { importer.getDefaultOptions(settings); } catch (e0) { /* start empty */ }
+	if (format === "obj") {
+		settings.setStringValue("Preset", "Custom");
+		settings.setFloatValue("Scale", Number(args.scale_cm || 1));
+		if (DazMcp.lower(args.up_axis) === "z") {
+			// Daz is Y up: file Z becomes Y, file Y becomes -Z.
+			settings.setStringValue("LatAxis", "X");
+			settings.setStringValue("VertAxis", "Z");
+			settings.setStringValue("DepthAxis", "Y");
+			settings.setBoolValue("InvertDepth", true);
+		} else {
+			settings.setStringValue("LatAxis", "X");
+			settings.setStringValue("VertAxis", "Y");
+			settings.setStringValue("DepthAxis", "Z");
+			settings.setBoolValue("InvertDepth", false);
+		}
+		settings.setBoolValue("InvertLat", false);
+		settings.setBoolValue("InvertVert", false);
+		settings.setBoolValue("IncludeVT", true);
+		settings.setBoolValue("IncludeG", true);
+		settings.setBoolValue("IncludeUsemtl", true);
+		settings.setBoolValue("IncludeMtllib", true);
+	} else if (args.take) {
+		settings.setStringValue("Take", args.take);
+	}
+	if (args.options) {
+		for (key in args.options) {
+			if (args.options.hasOwnProperty(key)) { setOption(settings, key, args.options[key]); }
+		}
+	}
+	settings.setIntValue("RunSilent", 1);
+
+	before = DazMcp.snapshot();
+	Scene.selectAllNodes(false);
+	err = importer.readFile(path, settings);
+	try { importer.deleteLater(); } catch (e1) { /* not a QObject here */ }
+	if (err !== undefined && err !== null && err !== true && Number(err) !== 0) {
+		throw DazMcp.fail("import_failed", "Daz Studio could not import " + path + ": " +
+			(typeof getErrorMessage === "function" ? getErrorMessage(err) : String(err)), { path: path });
+	}
+
+	added = DazMcp.addedSince(before);
+	if (!added.length) {
+		throw DazMcp.fail("import_failed", "The importer finished but nothing was added to the scene.", { path: path });
+	}
+	// The top nodes of what was imported (an FBX can bring a hierarchy).
+	var ids = {};
+	for (i = 0; i < added.length; i++) { ids[DazMcp.idOf(added[i])] = true; }
+	roots = [];
+	for (i = 0; i < added.length; i++) {
+		p = added[i].getNodeParent();
+		if (!p || !ids[DazMcp.idOf(p)]) { roots.push(added[i]); }
+	}
+	root = roots[0];
+	if (args.label && roots.length === 1) { root.setLabel(args.label); }
+
+	warnings = [];
+	if (args.post_scale && args.post_scale !== 1) {
+		for (i = 0; i < roots.length; i++) {
+			s = roots[i].getScaleControl();
+			s.setValue(s.getValue() * args.post_scale);
+		}
+	}
+	if (args.height) {
+		box = DazMcp.bboxOf(roots);
+		h = box ? box.max[1] - box.min[1] : 0;
+		if (h > 0) {
+			f = args.height / h;
+			for (i = 0; i < roots.length; i++) {
+				s = roots[i].getScaleControl();
+				s.setValue(s.getValue() * f);
+			}
+		} else {
+			warnings.push("The mesh has no height, so height was ignored.");
+		}
+	}
+	var pos = DazMcp.checkVec(args.position, "position");
+	if (pos) {
+		for (i = 0; i < roots.length; i++) { DazMcp.setTransform(roots[i], pos, null, null); }
+	}
+	if (args.drop_to_floor === true) {
+		box = DazMcp.bboxOf(roots);
+		if (box) {
+			for (i = 0; i < roots.length; i++) {
+				p = roots[i].getYPosControl();
+				p.setValue(p.getValue() - box.min[1]);
+			}
+		}
+	}
+
+	box = DazMcp.bboxOf(roots);
+	var info = DazMcp.boxInfo(box);
+	if (info) {
+		h = info.size[1];
+		var longest = Math.max(info.size[0], info.size[1], info.size[2]);
+		if (longest < 2) {
+			warnings.push("It is only " + DazMcp.round(longest, 3) + " cm across: the units are probably wrong " +
+				"(try units='m' or height=...).");
+		} else if (longest > 10000) {
+			warnings.push("It is " + DazMcp.round(longest / 100, 1) + " m across: the units are probably wrong " +
+				"(try units='mm' or 'cm', or height=...).");
+		}
+	}
+
+	var nodes = [];
+	for (i = 0; i < added.length && nodes.length < 50; i++) {
+		nodes.push({ label: added[i].getLabel(), type: DazMcp.nodeType(added[i]) });
+	}
+	var out = {
+		imported: path,
+		format: format,
+		label: root.getLabel(),
+		type: DazMcp.nodeType(root),
+		roots: DazMcp.labels(roots),
+		nodes: nodes,
+		bbox: info,
+		surfaces: DazMcp.surfaceLabels(root),
+		scale: DazMcp.round(root.getScaleControl().getValue(), 4),
+		warnings: warnings
+	};
+	if (out.type === "figure") {
+		out.bones = DazMcp.bones(root).length;
+		out.note = "It came with its own skeleton. It is not a Genesis rig: use wearable_from_mesh to make it " +
+			"follow a Genesis figure.";
+	}
+	DazMcp.selectOnly(root);
+	return out;
+}

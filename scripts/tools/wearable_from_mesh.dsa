@@ -1,0 +1,115 @@
+// Tool: wearable_from_mesh
+// Turns an imported mesh (a garment, hat, hair or armor modeled around a
+// figure) into clothing that follows that figure, with the Transfer Utility:
+// it copies the figure's skin weights (rigging) and its shape and pose
+// morphs onto the mesh, then fits it to the figure. This is what Daz's
+// Edit > Figure > Transfer Utility does.
+//
+// It also re-rigs clothing made for another figure: give an item already in
+// the scene that does not fit (for example made for Genesis 8) and the
+// figure it should follow.
+//
+// args:
+//   item          (string, required) label of the mesh or clothing
+//   figure        (string, required) label of the figure it is for
+//   kind          (string) "clothing" (default) or "hair"
+//   shape         (string) "base" (default): the mesh was modeled around the
+//                 figure's default shape; "current": around its current shape
+//                 (a character or morphs dialed in)
+//   morphs        (bool, default true) transfer shape and pose morphs, so it
+//                 follows body shape changes and corrective morphs
+//   smoothing     (bool, default true) add mesh smoothing with collision
+//   remove_unused_bones (bool, default true)
+//   label         (string) label for the new item
+//   allow_posed   (bool) do not stop when the figure is posed
+
+function dazmcpTool(args) {
+	var item = DazMcp.requireNode(args.item, "item");
+	var fig = DazMcp.requireNode(args.figure, "figure");
+	var kind = args.kind === "hair" ? "hair" : "clothing";
+	var type = DazMcp.nodeType(item);
+	var figBox, itemBox, posed, tu, ok, out, t, overlap;
+
+	if (DazMcp.nodeType(fig) !== "figure") {
+		if (DazMcp.nodeType(fig) === "fitted_figure" || DazMcp.nodeType(fig) === "bone") {
+			fig = DazMcp.ownerFigure(fig);
+		} else {
+			throw DazMcp.fail("bad_args", args.figure + " is a " + DazMcp.nodeType(fig) + ", not a figure.");
+		}
+	}
+	if (DazMcp.same(fig, item)) { throw DazMcp.fail("bad_args", "item and figure are the same node."); }
+	if (type !== "prop" && type !== "figure" && type !== "fitted_figure") {
+		throw DazMcp.fail("bad_args", args.item + " is a " + type + "; only meshes and clothing can be converted.");
+	}
+
+	posed = DazMcp.posedBones(fig);
+	if (posed.length && args.allow_posed !== true && DazMcp.lower(args.shape) !== "current") {
+		throw DazMcp.fail("figure_posed", fig.getLabel() + " is posed (" + posed.slice(0, 5).join(", ") +
+			"). The mesh must match the figure's default pose: run pose_reset, convert, then load the pose again.",
+			{ posed_bones: posed.slice(0, 20) });
+	}
+
+	figBox = DazMcp.bboxOf([fig]);
+	itemBox = DazMcp.bboxOf([item]);
+	if (figBox && itemBox) {
+		overlap = itemBox.min[0] < figBox.max[0] && itemBox.max[0] > figBox.min[0] &&
+			itemBox.min[1] < figBox.max[1] && itemBox.max[1] > figBox.min[1] &&
+			itemBox.min[2] < figBox.max[2] && itemBox.max[2] > figBox.min[2];
+		if (!overlap) {
+			throw DazMcp.fail("not_on_figure", args.item + " does not touch " + fig.getLabel() + ". Place it on " +
+				"the body first (same size and position as on the figure in its default pose).",
+				{ item_bbox: DazMcp.boxInfo(itemBox), figure_bbox: DazMcp.boxInfo(figBox) });
+		}
+	}
+
+	if (type === "fitted_figure") { item.setFollowTarget(null); }
+
+	tu = new DzTransferUtility();
+	if (!tu.setSource(fig)) { throw DazMcp.fail("transfer_failed", "The Transfer Utility did not accept " + fig.getLabel() + " as source."); }
+	if (!tu.setTarget(item)) { throw DazMcp.fail("transfer_failed", "The Transfer Utility did not accept " + item.getLabel() + " as target."); }
+	if (DazMcp.lower(args.shape) === "current") {
+		tu.setSourceBaseCurrent();
+		tu.setTargetBaseCurrent();
+	}
+	try { tu.setSilentImporters(true); } catch (e0) { /* older versions */ }
+	tu.setTransferBinding(true);
+	tu.setTransferMorphs(args.morphs !== false);
+	if (args.morphs !== false) {
+		try { tu.setTransferSourceMorphs(DzTransferUtility.ShapingAndPoseType); } catch (e1) { /* default list */ }
+	}
+	tu.setMergeHierarchies(true);
+	tu.setFitToFigure(true);
+	tu.setParentToFigure(true);
+	tu.setRemoveOriginalTarget(true);
+	tu.setRemoveUnusedTargetBones(args.remove_unused_bones !== false);
+	tu.setAddSmoothModifier(args.smoothing !== false);
+	tu.setUseSpecifiedContentType(true);
+	tu.setContentType(kind === "hair" ? "Follower/Hair" : "Follower/Wardrobe");
+
+	ok = tu.doTransfer();
+	if (!ok) {
+		throw DazMcp.fail("transfer_failed", "The Transfer Utility failed to convert " + args.item + ".");
+	}
+	out = tu.getTargetOutputFigure();
+	if (!out) { throw DazMcp.fail("transfer_failed", "The Transfer Utility made no figure."); }
+	if (!out.getFollowTarget || !out.getFollowTarget()) {
+		try { out.setFollowTarget(fig); } catch (e2) { /* reported below */ }
+	}
+	if (args.label) { out.setLabel(args.label); }
+	t = out.getFollowTarget ? out.getFollowTarget() : null;
+	var bones = DazMcp.bones(out).length;
+	var morphs = DazMcp.morphList(out, { include_hidden: true, limit: 1 }).total;
+	var result = {
+		label: out.getLabel(),
+		type: DazMcp.nodeType(out),
+		kind: kind,
+		fitted_to: t ? t.getLabel() : null,
+		bones: bones,
+		morphs: morphs,
+		smoothing: args.smoothing !== false,
+		surfaces: DazMcp.surfaceLabels(out)
+	};
+	if (!t) { result.warning = "The new item is not fitted; try wearable_fit."; }
+	if (posed.length) { result.note = "Load the pose again: the item now follows the figure."; }
+	return result;
+}

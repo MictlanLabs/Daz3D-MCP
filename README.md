@@ -3,15 +3,17 @@
 Let AI agents (Claude Code, Codex, Cursor, Antigravity, Gemini CLI, Claude
 Desktop, VS Code and any other MCP client) control **Daz Studio**: open and
 save scenes, find installed content, build characters (shape, clothing, hair,
-poses), set up cameras, lights and materials, render with Iray, and run DazScript.
+poses), set up cameras, lights and materials, render with Iray, install content
+from other stores, import OBJ and FBX models, and run DazScript.
 
 > Independent open source project. Not affiliated with or endorsed by Daz 3D.
 > [Leer en español](README.es.md)
 
-**Status: v0.2 (stage 2 of 4).** Scenes, content library, characters, cameras,
-lights, materials and rendering work. Third-party assets and animation come in
-the next stages. Stages 1 and 2 are tested against a simulated Daz Studio;
-their closing tests on a real Daz Studio 6 are still pending.
+**Status: v0.3 (stage 3 of 4).** Scenes, content library, characters, cameras,
+lights, materials, rendering and third-party assets (store packages, OBJ/FBX
+import, turning imported meshes into clothing) work. Animation comes in the
+next stage. Stages 1 to 3 are tested against a simulated Daz Studio; their
+closing tests on a real Daz Studio 6 are still pending.
 
 ## How it works
 
@@ -82,6 +84,12 @@ It is slower but needs nothing compiled.
 | `morph_list` / `morph_set` | Finds and sets shape dials |
 | `pose_bones` / `pose_reset` | Rotates bones / back to the default pose |
 | `wearable_fit` | Fits clothing or hair to a figure, or unfits it |
+| `package_inspect` / `package_install` | Looks inside a .zip from another store and installs its content into a library |
+| `package_list` / `package_uninstall` | Lists installed packages / removes exactly the files one installed |
+| `content_add_library` | Adds a folder to Daz Studio's content libraries |
+| `mesh_inspect` / `import_mesh` | Reads an OBJ or FBX (size, units, textures) / imports it at the right size, without dialogs |
+| `wearable_from_mesh` | Turns an imported garment into clothing that follows a figure (Transfer Utility) |
+| `wearable_adjust` | Mesh smoothing and collision of clothing (fixes skin poking through) |
 | `camera_create` / `camera_set` | Adds or changes a camera; can frame nodes automatically |
 | `light_create` / `light_set` | Adds or changes spot, point and distant lights |
 | `environment_set` | Iray dome, HDRI and sun-sky |
@@ -91,11 +99,13 @@ It is slower but needs nothing compiled.
 | `run_script` | Runs DazScript for anything else (can be disabled) |
 | `daz_guide` | Returns the skills as text for agents without skills support |
 
-Skills: `daz-basics`, `scene-building`, `characters`, `rendering`.
+Skills: `daz-basics`, `scene-building`, `characters`, `rendering`, `third-party-assets`.
 
 Try it: *"Open ~/Documents/scene.duf in Daz, describe the scene and show me a capture."*
 Or: *"Build a scene with two Genesis 9 characters, dressed and posed, talking
 to each other, and render it."*
+Or: *"Install ~/Downloads/jacket.zip, dress Ana with it, then import
+~/Downloads/cape.fbx and make it clothing that follows her."*
 
 Content search runs in the MCP server on an index of the library files
 (`~/.daz3d-mcp/content-index.json`, rebuilt every 24 hours or with
@@ -115,6 +125,8 @@ Content search runs in the MCP server on an index of the library files
 | `render_dir` | `~/.daz3d-mcp/renders` | Where renders go when no path is given |
 | `content_libraries` | `[]` | Extra library folders to search |
 | `content_index_max_age_hours` | `24` | When to rebuild the content index |
+| `install_library` | `~/Documents/DAZ 3D/Third Party Library` | Where `package_install` puts packages |
+| `max_package_gb` | `20` | Largest package (unpacked) `package_install` accepts |
 
 ## Security
 

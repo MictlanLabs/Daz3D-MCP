@@ -52,7 +52,8 @@ var PROP_CLASSES = {
 	enum: ["DzEnumProperty", "DzIntProperty", "DzNumericProperty", "DzProperty"],
 	bool: ["DzBoolProperty", "DzIntProperty", "DzNumericProperty", "DzProperty"],
 	image: ["DzImageProperty", "DzProperty"],
-	string: ["DzStringProperty", "DzProperty"]
+	string: ["DzStringProperty", "DzProperty"],
+	node: ["DzNodeProperty", "DzProperty"]
 };
 
 // --------------------------------------------------------- templates ----
@@ -190,9 +191,16 @@ Prop.prototype.className = function () { return PROP_CLASSES[this.d.type || "flo
 Prop.prototype.inherits = function (c) { return PROP_CLASSES[this.d.type || "float"].indexOf(c) >= 0; };
 Prop.prototype.getValue = function () {
 	if (this.d.type === "bool") { return this.d.value ? 1 : 0; }
+	if (this.d.type === "node") { return wrap(byId(this.d.value)); }
 	return this.d.value;
 };
 Prop.prototype.setValue = function (v) {
+	if (this.d.type === "node") {
+		if (v !== null && !(v instanceof Node)) { throw new Error("setValue on a node property needs a DzNode"); }
+		this.d.value = v ? v.d.id : null;
+		this.onChange();
+		return;
+	}
 	if (this.d.type === "color" || this.d.type === "image") { throw new Error("setValue on " + this.d.type); }
 	if (typeof v !== "number" && this.d.type !== "string") { throw new Error("setValue needs a number"); }
 	if (this.d.min !== undefined && this.d.type !== "string") { v = Math.max(this.d.min, Math.min(this.d.max, v)); }
@@ -289,7 +297,27 @@ Node.prototype.getNodeChildren = function (recurse) {
 	});
 	return out;
 };
-Node.prototype.addNodeChild = function (child) { child.d.parent = this.d.id; changed(); };
+// inPlace keeps the child where it is in the world (followers snap to their figure anyway).
+Node.prototype.addNodeChild = function (child, inPlace) {
+	if (inPlace && !child.d.fitted_to) {
+		var w = child.getWSPos();
+		var p = this.getWSPos();
+		var s = this.getWSScale();
+		child.d.position = [(w.x - p.x) / s, (w.y - p.y) / s, (w.z - p.z) / s];
+	}
+	child.d.parent = this.d.id;
+	changed();
+};
+Node.prototype.removeNodeChild = function (child, inPlace) {
+	if (child.d.parent !== this.d.id) { return false; }
+	if (inPlace) {
+		var w = child.getWSPos();
+		child.d.position = [w.x, w.y, w.z];
+	}
+	child.d.parent = null;
+	changed();
+	return true;
+};
 Node.prototype.isVisible = function () { return this.d.visible !== false; };
 Node.prototype.setVisible = function (v) { this.d.visible = !!v; changed(); };
 Node.prototype.isSelected = function () { return !!this.d.selected; };
@@ -504,7 +532,8 @@ global.Scene = {
 // ------------------------------------------------------------ content ----
 function contentDirs() {
 	var env = process.env.DAZMCP_FAKE_CONTENT_DIRS;
-	return env ? env.split(path.delimiter).filter(Boolean) : (state.contentDirs || []);
+	var base = env ? env.split(path.delimiter).filter(Boolean) : (state.contentDirs || []);
+	return base.concat(state.addedContentDirs || []);
 }
 
 function readContent(file) {
@@ -666,10 +695,21 @@ global.App = {
 		return {
 			getNumContentDirectories: function () { return contentDirs().length; },
 			getContentDirectoryPath: function (i) { return contentDirs()[i]; },
-			getNumPoserDirectories: function () { return 0; },
+			getNumPoserDirectories: function () { return (state.poserDirs || []).length; },
+			getPoserDirectoryPath: function (i) { return state.poserDirs[i]; },
+			addContentDirectory: function (dir) {
+				if (!fs.existsSync(dir)) { return; }
+				state.addedContentDirs = (state.addedContentDirs || []).concat([dir]);
+				saveState();
+			},
+			addPoserDirectory: function (dir) {
+				state.poserDirs = (state.poserDirs || []).concat([dir]);
+				saveState();
+			},
 			openFile: openContent
 		};
 	},
+	getImportMgr: function () { return importMgr; },
 	getImageMgr: function () {
 		return { getImage: function (p) { return { getFilename: function () { return p; } }; } };
 	},
@@ -733,6 +773,245 @@ global.DzFile = function (p) {
 	this.rename = function (n) { fs.renameSync(p, n); p = n; return true; };
 };
 global.DzFile.WriteOnly = 2;
+
+// ------------------------------------------------------------ import ----
+// The OBJ and FBX importers. Like Daz Studio, they show an options dialog
+// unless RunSilent is 1, which would block a script, so here that is an error.
+global.DzFileIOSettings = function () {
+	var values = {};
+	var set = function (k, v) { values[k] = v; };
+	this.setBoolValue = set;
+	this.setIntValue = set;
+	this.setFloatValue = set;
+	this.setStringValue = set;
+	this.getBoolValue = function (k, d) { return values.hasOwnProperty(k) ? !!values[k] : d; };
+	this.getIntValue = function (k, d) { return values.hasOwnProperty(k) ? values[k] : d; };
+	this.getFloatValue = function (k, d) { return values.hasOwnProperty(k) ? values[k] : d; };
+	this.getStringValue = function (k, d) { return values.hasOwnProperty(k) ? values[k] : d; };
+	this.values = values;
+};
+
+function parseObj(file, opts) {
+	var axes = { X: 0, Y: 1, Z: 2 };
+	var lat = axes[opts.LatAxis || "X"], vert = axes[opts.VertAxis || "Y"], depth = axes[opts.DepthAxis || "Z"];
+	var scale = opts.Scale;
+	var mn = null, mx = null, mats = [];
+	fs.readFileSync(file, "utf8").split(/\r?\n/).forEach(function (line) {
+		var parts = line.trim().split(/\s+/);
+		if (parts[0] === "v") {
+			var raw = [Number(parts[1]), Number(parts[2]), Number(parts[3])];
+			var p = [raw[lat] * scale, raw[vert] * scale, raw[depth] * scale * (opts.InvertDepth ? -1 : 1)];
+			if (!mn) { mn = p.slice(); mx = p.slice(); }
+			for (var i = 0; i < 3; i++) { mn[i] = Math.min(mn[i], p[i]); mx[i] = Math.max(mx[i], p[i]); }
+		} else if (parts[0] === "usemtl" && opts.IncludeUsemtl && mats.indexOf(parts[1]) < 0) {
+			mats.push(parts[1]);
+		}
+	});
+	return { bbox: [mn, mx], materials: mats.length ? mats : ["default"], bones: [] };
+}
+
+// A small binary FBX reader: enough for unit, vertices, materials and bones.
+function parseFbx(file) {
+	var buf = fs.readFileSync(file);
+	if (buf.toString("latin1", 0, 18) !== "Kaydara FBX Binary") { throw new Error("only binary FBX in the fake"); }
+	var version = buf.readUInt32LE(23);
+	var wide = version >= 7500;
+	var head = wide ? 25 : 13;
+	function readNode(pos) {
+		var end = wide ? Number(buf.readBigUInt64LE(pos)) : buf.readUInt32LE(pos);
+		var nprops = wide ? Number(buf.readBigUInt64LE(pos + 8)) : buf.readUInt32LE(pos + 4);
+		var nameLen = buf[pos + head - 1];
+		if (end === 0) { return { node: null, next: pos + head }; }
+		var name = buf.toString("ascii", pos + head, pos + head + nameLen);
+		var p = pos + head + nameLen;
+		var props = [];
+		for (var i = 0; i < nprops; i++) {
+			var code = String.fromCharCode(buf[p]); p += 1;
+			if (code === "D") { props.push(buf.readDoubleLE(p)); p += 8; }
+			else if (code === "I") { props.push(buf.readInt32LE(p)); p += 4; }
+			else if (code === "L") { props.push(Number(buf.readBigInt64LE(p))); p += 8; }
+			else if (code === "F") { props.push(buf.readFloatLE(p)); p += 4; }
+			else if (code === "Y") { props.push(buf.readInt16LE(p)); p += 2; }
+			else if (code === "C") { props.push(!!buf[p]); p += 1; }
+			else if (code === "S" || code === "R") {
+				var len = buf.readUInt32LE(p); p += 4;
+				props.push(code === "S" ? buf.toString("utf8", p, p + len) : null); p += len;
+			} else if ("fdlib".indexOf(code) >= 0) {
+				var n = buf.readUInt32LE(p), enc = buf.readUInt32LE(p + 4), clen = buf.readUInt32LE(p + 8);
+				p += 12;
+				var data = buf.slice(p, p + clen); p += clen;
+				if (enc === 1) { data = zlib.inflateSync(data); }
+				var arr = [];
+				for (var k = 0; k < n; k++) {
+					if (code === "d") { arr.push(data.readDoubleLE(k * 8)); }
+					else if (code === "f") { arr.push(data.readFloatLE(k * 4)); }
+					else if (code === "i") { arr.push(data.readInt32LE(k * 4)); }
+					else if (code === "l") { arr.push(Number(data.readBigInt64LE(k * 8))); }
+					else { arr.push(!!data[k]); }
+				}
+				props.push(arr);
+			} else { throw new Error("bad FBX property " + code); }
+		}
+		var children = [];
+		while (p < end) {
+			var r = readNode(p);
+			p = r.next;
+			if (!r.node) { break; }
+			children.push(r.node);
+		}
+		return { node: { name: name, props: props, children: children }, next: end };
+	}
+	var nodes = [], pos = 27;
+	while (pos < buf.length - head) {
+		var r = readNode(pos);
+		if (!r.node) { break; }
+		nodes.push(r.node);
+		pos = r.next;
+	}
+	var unit = 1, verts = [], mats = [], bones = [];
+	nodes.forEach(function (n) {
+		if (n.name === "GlobalSettings") {
+			n.children.forEach(function (c) {
+				if (c.name !== "Properties70") { return; }
+				c.children.forEach(function (pp) { if (pp.props[0] === "UnitScaleFactor") { unit = pp.props[4]; } });
+			});
+		}
+		if (n.name === "Objects") {
+			n.children.forEach(function (o) {
+				var nm = String(o.props[1] || "").split("\u0000")[0];
+				if (o.name === "Geometry") {
+					o.children.forEach(function (c) { if (c.name === "Vertices") { verts = verts.concat(c.props[0]); } });
+				} else if (o.name === "Material") { mats.push(nm); }
+				else if (o.name === "Model" && o.props[2] === "LimbNode") { bones.push(nm); }
+			});
+		}
+	});
+	var mn = null, mx = null;
+	for (var i = 0; i + 2 < verts.length; i += 3) {
+		var v = [verts[i] * unit, verts[i + 1] * unit, verts[i + 2] * unit];
+		if (!mn) { mn = v.slice(); mx = v.slice(); }
+		for (var j = 0; j < 3; j++) { mn[j] = Math.min(mn[j], v[j]); mx[j] = Math.max(mx[j], v[j]); }
+	}
+	return { bbox: [mn, mx], materials: mats.length ? mats : ["default"], bones: bones };
+}
+
+function makeImporter(cls, ext) {
+	return {
+		className: function () { return cls; },
+		getDefaultOptions: function (s) {
+			if (cls === "DzObjImporter") {
+				s.setStringValue("Preset", "Poser (1 unit = 8ft)");
+				s.setFloatValue("Scale", 243.84);
+				s.setStringValue("LatAxis", "X");
+				s.setStringValue("VertAxis", "Y");
+				s.setStringValue("DepthAxis", "Z");
+				s.setBoolValue("IncludeUsemtl", true);
+			}
+			s.setIntValue("RunSilent", 0);
+		},
+		deleteLater: function () {},
+		readFile: function (file, settings) {
+			var opts = settings ? settings.values : {};
+			state.imports = (state.imports || []).concat([{ file: path.basename(file), importer: cls, options: opts }]);
+			saveState();
+			if (opts.RunSilent !== 1) { throw new Error("The importer options dialog opened and blocked the script"); }
+			if (!fs.existsSync(file)) { return 2; }
+			var mesh = ext === "obj" ? parseObj(file, opts) : parseFbx(file);
+			var label = uniqueLabel(path.basename(file).replace(/\.[^.]+$/, ""));
+			var d = {
+				class: mesh.bones.length ? "DzFigure" : "DzNode", label: label, name: label.replace(/\W/g, "_"),
+				geometry: true, bbox_local: mesh.bbox, position: [0, 0, 0], rotation: [0, 0, 0],
+				imported_from: file,
+				materials: mesh.materials.map(function (m) { return { name: m, label: m, shader: "Iray Uber", props: clothProps([0.7, 0.7, 0.7]) }; })
+			};
+			var node = new Node(d);
+			Scene.addNode(node);
+			mesh.bones.forEach(function (b) {
+				Scene.addNode(new Node({ class: "DzBone", name: b, label: b, parent: d.id, position: [0, 0, 0], rotation: [0, 0, 0] }));
+			});
+			return 0;
+		}
+	};
+}
+
+var importMgr = {
+	findImporterByClassName: function (cls) {
+		if (cls === "DzObjImporter") { return makeImporter(cls, "obj"); }
+		if (cls === "DzFbxImporter") { return makeImporter(cls, "fbx"); }
+		return null;
+	},
+	findImporter: function (file) {
+		var ext = path.extname(file).toLowerCase();
+		return ext === ".obj" ? makeImporter("DzObjImporter", "obj") : ext === ".fbx" ? makeImporter("DzFbxImporter", "fbx") : null;
+	}
+};
+
+// ---------------------------------------------------- transfer utility ----
+// Projects a figure's rigging onto a mesh. The fake checks the settings a
+// script must give and builds a fitted figure the way Daz Studio does.
+global.DzTransferUtility = function () {
+	var cfg = { source: null, target: null, binding: false, morphs: false, fit: false, parent: false,
+		removeOriginal: false, smooth: false, contentType: "", useContentType: false, sourceBase: "base" };
+	this.cfg = cfg;
+	this.setSource = function (n) { if (!(n instanceof Node)) { return false; } cfg.source = n; return true; };
+	this.setTarget = function (n) { if (!(n instanceof Node)) { return false; } cfg.target = n; return true; };
+	this.setSourceBaseCurrent = function () { cfg.sourceBase = "current"; return true; };
+	this.setTargetBaseCurrent = function () { return true; };
+	this.setSilentImporters = function (b) { cfg.silent = b; };
+	this.setTransferBinding = function (b) { cfg.binding = b; };
+	this.setTransferMorphs = function (b) { cfg.morphs = b; };
+	this.setTransferSourceMorphs = function (t) { cfg.morphType = t; };
+	this.setMergeHierarchies = function (b) { cfg.merge = b; };
+	this.setFitToFigure = function (b) { cfg.fit = b; };
+	this.setParentToFigure = function (b) { cfg.parent = b; };
+	this.setRemoveOriginalTarget = function (b) { cfg.removeOriginal = b; };
+	this.setRemoveUnusedTargetBones = function (b) { cfg.removeUnused = b; };
+	this.setAddSmoothModifier = function (b) { cfg.smooth = b; };
+	this.setUseSpecifiedContentType = function (b) { cfg.useContentType = b; };
+	this.setContentType = function (t) { cfg.contentType = t; };
+	this.doTransfer = function () {
+		var src = cfg.source, tgt = cfg.target;
+		if (!src || !tgt || !src.inherits("DzFigure") || !cfg.binding) { return false; }
+		if (!tgt.d.geometry) { return false; }
+		var box = tgt.getWSBoundingBox();
+		var sp = src.getWSPos(), ss = src.getWSScale();
+		var d = {
+			class: "DzFigure", label: tgt.d.label, name: tgt.d.name, geometry: true,
+			bbox_local: [[(box.min.x - sp.x) / ss, (box.min.y - sp.y) / ss, (box.min.z - sp.z) / ss],
+				[(box.max.x - sp.x) / ss, (box.max.y - sp.y) / ss, (box.max.z - sp.z) / ss]],
+			position: [0, 0, 0], rotation: [0, 0, 0],
+			materials: tgt.d.materials || [],
+			content_type: cfg.useContentType ? cfg.contentType : "Follower",
+			transfer: { morphs: cfg.morphs, base: cfg.sourceBase, smooth: cfg.smooth }
+		};
+		if (cfg.fit) { d.fitted_to = src.d.id; }
+		if (cfg.parent || cfg.fit) { d.parent = src.d.id; }
+		if (cfg.morphs) {
+			d.morphs = (src.d.morphs || []).filter(function (m) { return !/^(Ana|Leo)9/.test(m.name); })
+				.map(function (m) { return { name: m.name, label: m.label, group: m.group, value: 0, min: m.min, max: m.max, hidden: true }; });
+		}
+		if (cfg.smooth) {
+			d.props = {
+				"Enable Smoothing": { type: "bool", value: true },
+				"Smoothing Iterations": { type: "int", value: 2, min: 0, max: 100 },
+				"Collision Item": { type: "node", value: src.d.id },
+				"Collision Iterations": { type: "int", value: 1, min: 0, max: 100 }
+			};
+		}
+		if (cfg.removeOriginal) { Scene.removeNode(tgt); }
+		var out = new Node(d);
+		Scene.addNode(out);
+		src.boneNodes().forEach(function (b) {
+			Scene.addNode(new Node({ class: "DzBone", name: b.d.name, label: b.d.label, parent: d.id, position: [0, 0, 0], rotation: [0, 0, 0] }));
+		});
+		cfg.output = out;
+		state.transfers = (state.transfers || []).concat([{ source: src.d.label, target: d.label,
+			content_type: d.content_type, morphs: cfg.morphs, smooth: cfg.smooth, base: cfg.sourceBase }]);
+		return true;
+	};
+	this.getTargetOutputFigure = function () { return cfg.output || null; };
+};
+global.DzTransferUtility.ShapingAndPoseType = 4;
 
 // Old state files and fixtures have no ids yet.
 if (state.nodes.some(function (n) { return n.id === undefined; })) {

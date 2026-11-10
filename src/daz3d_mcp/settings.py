@@ -33,6 +33,11 @@ class Settings:
     content_libraries: list = field(default_factory=list)
     # Hours before the content library index is rebuilt.
     content_index_max_age_hours: float = 24.0
+    # Content library that package_install uses when the agent names none
+    # (default ~/Documents/DAZ 3D/Third Party Library).
+    install_library: str | None = None
+    # Largest package (unpacked) that package_install accepts, in GB.
+    max_package_gb: float = 20.0
     extra: dict = field(default_factory=dict)
 
     @property

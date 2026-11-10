@@ -4,16 +4,18 @@ Permite que agentes de IA (Claude Code, Codex, Cursor, Antigravity, Gemini CLI,
 Claude Desktop, VS Code y cualquier cliente MCP) controlen **Daz Studio**:
 abrir y guardar escenas, buscar el contenido instalado, crear personajes
 (forma, ropa, pelo, poses), preparar cámaras, luces y materiales, renderizar con
-Iray y ejecutar DazScript.
+Iray, instalar contenido de otras tiendas, importar modelos OBJ y FBX y ejecutar
+DazScript.
 
 > Proyecto open source independiente. No está afiliado ni respaldado por Daz 3D.
 > [Read in English](README.md)
 
-**Estado: v0.2 (etapa 2 de 4).** Funcionan escenas, biblioteca de contenido,
-personajes, cámaras, luces, materiales y render. Los assets de terceros y la
-animación llegan en las siguientes etapas. Las etapas 1 y 2 están probadas
-contra un Daz Studio simulado; sus pruebas de cierre en un Daz Studio 6 real
-siguen pendientes.
+**Estado: v0.3 (etapa 3 de 4).** Funcionan escenas, biblioteca de contenido,
+personajes, cámaras, luces, materiales, render y assets de terceros (paquetes
+de otras tiendas, importar OBJ/FBX y convertir mallas importadas en ropa). La
+animación llega en la siguiente etapa. Las etapas 1 a 3 están probadas contra
+un Daz Studio simulado; sus pruebas de cierre en un Daz Studio 6 real siguen
+pendientes.
 
 ## Cómo funciona
 
@@ -85,6 +87,12 @@ script. Es más lento pero no necesita compilar nada.
 | `morph_list` / `morph_set` | Busca y ajusta diales de forma |
 | `pose_bones` / `pose_reset` | Rota huesos / vuelve a la pose por defecto |
 | `wearable_fit` | Ajusta ropa o pelo a una figura, o lo desajusta |
+| `package_inspect` / `package_install` | Revisa un .zip de otra tienda e instala su contenido en una biblioteca |
+| `package_list` / `package_uninstall` | Lista los paquetes instalados / borra exactamente los archivos que instaló uno |
+| `content_add_library` | Agrega una carpeta a las bibliotecas de contenido de Daz Studio |
+| `mesh_inspect` / `import_mesh` | Lee un OBJ o FBX (tamaño, unidades, texturas) / lo importa al tamaño correcto, sin diálogos |
+| `wearable_from_mesh` | Convierte una prenda importada en ropa que sigue a una figura (Transfer Utility) |
+| `wearable_adjust` | Suavizado y colisión de la ropa (corrige la piel que atraviesa la tela) |
 | `camera_create` / `camera_set` | Crea o cambia una cámara; puede encuadrar nodos sola |
 | `light_create` / `light_set` | Crea o cambia luces spot, point y distant |
 | `environment_set` | Domo de Iray, HDRI y sol-cielo |
@@ -94,11 +102,13 @@ script. Es más lento pero no necesita compilar nada.
 | `run_script` | Ejecuta DazScript para todo lo demás (se puede desactivar) |
 | `daz_guide` | Devuelve las skills como texto para agentes sin soporte de skills |
 
-Skills: `daz-basics`, `scene-building`, `characters`, `rendering`.
+Skills: `daz-basics`, `scene-building`, `characters`, `rendering`, `third-party-assets`.
 
 Pruébalo: *"Abre ~/Documents/escena.duf en Daz, describe la escena y muéstrame una captura."*
 O: *"Monta una escena con dos personajes Genesis 9, vestidos y posados,
 conversando, y renderízala."*
+O: *"Instala ~/Downloads/chaqueta.zip, viste a Ana con ella, luego importa
+~/Downloads/capa.fbx y conviértela en ropa que la siga."*
 
 La búsqueda de contenido corre en el servidor MCP sobre un índice de los
 archivos de la biblioteca (`~/.daz3d-mcp/content-index.json`, se reconstruye
@@ -119,6 +129,8 @@ Daz Studio.
 | `render_dir` | `~/.daz3d-mcp/renders` | Dónde van los renders sin ruta |
 | `content_libraries` | `[]` | Carpetas de biblioteca extra para buscar |
 | `content_index_max_age_hours` | `24` | Cada cuánto se reconstruye el índice de contenido |
+| `install_library` | `~/Documents/DAZ 3D/Third Party Library` | Dónde instala `package_install` los paquetes |
+| `max_package_gb` | `20` | Paquete más grande (descomprimido) que acepta `package_install` |
 
 ## Seguridad
 

@@ -1,0 +1,38 @@
+// Tool: content_add_library
+// Adds a folder to Daz Studio's content libraries (Content Directory
+// Manager), so its content shows in the Content Library pane and the files
+// inside it can find each other (a .duf finds its data/ files through the
+// mapped libraries). Daz saves the list, so it stays after a restart.
+//
+// args:
+//   path (string, required) absolute folder path
+//   kind (string) "daz" (default) or "poser" (a folder with a Runtime folder)
+
+function dazmcpTool(args) {
+	var kind = args.kind || "daz";
+	var mgr = App.getContentMgr();
+	var dirs, i;
+	if (!args.path) { throw DazMcp.fail("bad_args", "path is required."); }
+	if (!(new DzDir(args.path)).exists()) { throw DazMcp.fail("not_found", "Folder not found: " + args.path); }
+	dirs = DazMcp.contentDirs();
+	for (i = 0; i < dirs.length; i++) {
+		if (dirs[i].kind === kind && DazMcp.samePath(dirs[i].path, args.path)) {
+			return { path: dirs[i].path, kind: kind, added: false, libraries: dirs };
+		}
+	}
+	if (kind === "poser") {
+		mgr.addPoserDirectory(args.path, true);
+	} else {
+		mgr.addContentDirectory(args.path, true);
+	}
+	dirs = DazMcp.contentDirs();
+	var found = false;
+	for (i = 0; i < dirs.length; i++) {
+		if (dirs[i].kind === kind && DazMcp.samePath(dirs[i].path, args.path)) { found = true; }
+	}
+	if (!found) {
+		throw DazMcp.fail("add_failed", "Daz Studio did not add " + args.path + " to its content libraries.",
+			{ libraries: dirs });
+	}
+	return { path: args.path, kind: kind, added: true, libraries: dirs };
+}

@@ -1,0 +1,81 @@
+// Tool: wearable_adjust
+// Fixes how clothing sits on a figure: mesh smoothing and collision (the
+// usual cure for skin poking through), and any other property of the item.
+// Without arguments it reports the current values.
+//
+// args:
+//   item                  (string, required) clothing or hair label
+//   smoothing             (bool) mesh smoothing on/off
+//   smoothing_iterations  (number)
+//   collision_iterations  (number)
+//   collide_with          (string) figure label ("" for none); defaults to
+//                         the figure it is fitted to when collision is set
+//   properties            {label: value} other properties of the item
+
+var LABELS = {
+	smoothing: ["Enable Smoothing", "Smoothing Enabled"],
+	smoothing_iterations: ["Smoothing Iterations"],
+	collision_iterations: ["Collision Iterations"],
+	collide_with: ["Collision Item"]
+};
+
+function report(item) {
+	var out = {};
+	var key, p, v;
+	for (key in LABELS) {
+		if (!LABELS.hasOwnProperty(key)) { continue; }
+		p = DazMcp.findPropDeep(item, LABELS[key]);
+		if (!p) { out[key] = null; continue; }
+		if (key === "collide_with") {
+			try { v = p.getValue(); out[key] = v ? v.getLabel() : null; } catch (e) { out[key] = null; }
+		} else {
+			out[key] = DazMcp.propInfo(p).value;
+		}
+	}
+	return out;
+}
+
+function dazmcpTool(args) {
+	var item = DazMcp.requireNode(args.item, "item");
+	var notFound = [];
+	var set = [];
+	var key, p, target, res;
+	var fitted = item.getFollowTarget ? item.getFollowTarget() : null;
+
+	if ((args.collision_iterations !== undefined || args.collide_with) && args.collide_with !== "") {
+		target = args.collide_with ? DazMcp.requireNode(args.collide_with, "collide_with") : fitted;
+		p = DazMcp.findPropDeep(item, LABELS.collide_with);
+		if (!p) { notFound.push("collide_with"); }
+		else if (target) { p.setValue(target); set.push("collide_with"); }
+	} else if (args.collide_with === "") {
+		p = DazMcp.findPropDeep(item, LABELS.collide_with);
+		if (p) { p.setValue(null); set.push("collide_with"); } else { notFound.push("collide_with"); }
+	}
+	for (key in LABELS) {
+		if (!LABELS.hasOwnProperty(key) || key === "collide_with") { continue; }
+		if (args[key] === undefined || args[key] === null) { continue; }
+		p = DazMcp.findPropDeep(item, LABELS[key]);
+		if (!p) { notFound.push(key); continue; }
+		DazMcp.setPropValue(p, args[key]);
+		set.push(key);
+	}
+	if (args.properties) {
+		for (key in args.properties) {
+			if (!args.properties.hasOwnProperty(key)) { continue; }
+			p = DazMcp.findPropDeep(item, [key]);
+			if (!p) { notFound.push(key); continue; }
+			DazMcp.setPropValue(p, args.properties[key]);
+			set.push(key);
+		}
+	}
+	res = report(item);
+	res.item = item.getLabel();
+	res.fitted_to = fitted ? fitted.getLabel() : null;
+	res.set = set;
+	res.not_found = notFound;
+	if (res.smoothing === null && (args.smoothing !== undefined || args.collision_iterations !== undefined)) {
+		res.hint = "This item has no mesh smoothing modifier. Items made with wearable_from_mesh get one; for " +
+			"others use Edit > Object > Geometry > Add Smoothing Modifier in Daz.";
+	}
+	return res;
+}

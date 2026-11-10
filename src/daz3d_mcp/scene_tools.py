@@ -53,8 +53,13 @@ def _clean(**kwargs) -> dict:
     return {k: v for k, v in kwargs.items() if v is not None}
 
 
-def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient]) -> None:
+def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient]) -> Callable[[], None]:
+    """Adds the tools; returns a function that forgets the cached libraries and index."""
     state: dict[str, Any] = {"libraries": None, "index": None}
+
+    def forget() -> None:
+        state["libraries"] = None
+        state["index"] = None
 
     async def libraries(refresh: bool = False) -> list[str]:
         if state["libraries"] is None or refresh:
@@ -148,11 +153,17 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient]) -> N
         label: Annotated[str | None, Field(description="New label.")] = None,
         drop_to_floor: Annotated[bool, Field(description="Move it so its lowest point touches Y = 0.")] = False,
         select: Annotated[bool, Field(description="Select it in Daz.")] = False,
+        parent: Annotated[str | None, Field(description="Attach it to this node (it keeps its place in the "
+                                                        "world); \"\" detaches it.")] = None,
+        parent_bone: Annotated[str | None, Field(description="With parent = a figure: the bone to attach to, "
+                                                             "e.g. 'r_hand' for a sword, 'head' for a hat.")] = None,
     ) -> dict:
-        """Moves, rotates, scales, shows/hides, renames or selects a figure, prop, camera or light."""
+        """Moves, rotates, scales, shows/hides, renames, selects or attaches (parents) a figure, prop,
+        camera or light."""
         return await call("node_set", _clean(node=node, position=position, rotation=rotation, scale=scale,
                                              relative=relative, visible=visible, label=label,
-                                             drop_to_floor=drop_to_floor, select=select))
+                                             drop_to_floor=drop_to_floor, select=select, parent=parent,
+                                             parent_bone=parent_bone))
 
     @mcp.tool(annotations=DESTRUCTIVE)
     async def node_delete(
@@ -388,3 +399,5 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient]) -> N
                 content.append(Image(data=shown.read_bytes(), format=fmt))
         content.append(json.dumps(result))
         return content
+
+    return forget

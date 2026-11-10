@@ -11,6 +11,29 @@
 //   label         (string) new label
 //   drop_to_floor (bool) move it up or down so its lowest point is at Y = 0
 //   select        (bool) make it the selected node
+//   parent        (string) label of the new parent ("" puts it back at the
+//                 scene root); it keeps its place in the world
+//   parent_bone   (string) with parent = a figure: attach to this bone, e.g.
+//                 a sword to "r_hand", a hat to "head"
+
+function reparent(node, parentRef, boneRef) {
+	var old = node.getNodeParent();
+	var parent, bone;
+	if (parentRef === "") {
+		if (old) { old.removeNodeChild(node, true); }
+		return;
+	}
+	parent = DazMcp.requireNode(parentRef, "parent");
+	if (boneRef) {
+		var fig = DazMcp.requireFigure(parentRef);
+		bone = DazMcp.findBone(fig, boneRef);
+		if (!bone) { throw DazMcp.fail("not_found", fig.getLabel() + " has no bone " + boneRef + "."); }
+		parent = bone;
+	}
+	if (DazMcp.same(parent, node)) { throw DazMcp.fail("bad_args", "A node cannot be its own parent."); }
+	if (old) { old.removeNodeChild(node, true); }
+	parent.addNodeChild(node, true);
+}
 
 function dazmcpTool(args) {
 	var node = DazMcp.requireNode(args.node, "node");
@@ -22,6 +45,7 @@ function dazmcpTool(args) {
 		if (pos) { pos = [now.position[0] + pos[0], now.position[1] + pos[1], now.position[2] + pos[2]]; }
 		if (rot) { rot = [now.rotation[0] + rot[0], now.rotation[1] + rot[1], now.rotation[2] + rot[2]]; }
 	}
+	if (args.parent !== undefined && args.parent !== null) { reparent(node, args.parent, args.parent_bone); }
 	DazMcp.setTransform(node, pos, rot, args.scale);
 
 	if (args.drop_to_floor === true) {
@@ -40,6 +64,7 @@ function dazmcpTool(args) {
 	var out = DazMcp.transformOf(node);
 	out.label = node.getLabel();
 	out.visible = node.isVisible();
+	out.parent = node.getNodeParent() ? node.getNodeParent().getLabel() : null;
 	out.position_ws = DazMcp.vec(node.getWSPos());
 	box = DazMcp.bboxOf([node]);
 	if (box) { out.bbox_ws = { min: DazMcp.vec({ x: box.min[0], y: box.min[1], z: box.min[2] }),

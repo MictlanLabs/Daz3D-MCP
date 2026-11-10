@@ -8,7 +8,7 @@
 
 var DazMcp = {};
 
-DazMcp.LIB_VERSION = "0.2.0";
+DazMcp.LIB_VERSION = "0.3.0";
 
 // ---------------------------------------------------------------- JSON ----
 // Daz Studio 4.x and 6 both ship a JSON object, but keep a tiny fallback so an
@@ -795,4 +795,97 @@ DazMcp.materialsOf = function (node, names) {
 		}
 	}
 	return out;
+};
+
+
+// ======================================================= stage 3 helpers ==
+// Third-party assets: libraries, imported meshes and the Transfer Utility.
+
+// Same folder, whatever the slashes, case or trailing slash.
+DazMcp.samePath = function (a, b) {
+	var norm = function (p) { return DazMcp.lower(p).replace(/\\/g, "/").replace(/\/+$/, ""); };
+	return norm(a) === norm(b);
+};
+
+DazMcp.contentDirs = function () {
+	var mgr = App.getContentMgr();
+	var out = [];
+	var i, n;
+	n = mgr.getNumContentDirectories();
+	for (i = 0; i < n; i++) { out.push({ path: String(mgr.getContentDirectoryPath(i)), kind: "daz" }); }
+	try {
+		n = mgr.getNumPoserDirectories();
+		for (i = 0; i < n; i++) { out.push({ path: String(mgr.getPoserDirectoryPath(i)), kind: "poser" }); }
+	} catch (e) { /* not available */ }
+	return out;
+};
+
+// Bones rotated more than half a degree.
+DazMcp.posedBones = function (figure) {
+	var bones = DazMcp.bones(figure);
+	var out = [];
+	var i, b;
+	for (i = 0; i < bones.length; i++) {
+		b = bones[i];
+		if (Math.abs(b.getXRotControl().getValue()) > 0.5 || Math.abs(b.getYRotControl().getValue()) > 0.5 ||
+				Math.abs(b.getZRotControl().getValue()) > 0.5) {
+			out.push(b.getName());
+		}
+	}
+	return out;
+};
+
+// Nodes in the scene now that were not in a snapshot (see DazMcp.snapshot).
+DazMcp.snapshot = function () {
+	var all = Scene.getNodeList();
+	var seen = {};
+	var i;
+	for (i = 0; i < all.length; i++) { seen[DazMcp.idOf(all[i])] = true; }
+	return seen;
+};
+
+DazMcp.addedSince = function (before) {
+	var all = Scene.getNodeList();
+	var out = [];
+	var i;
+	for (i = 0; i < all.length; i++) {
+		if (before[DazMcp.idOf(all[i])]) { continue; }
+		if (DazMcp.nodeType(all[i]) === "bone") { continue; }
+		out.push(all[i]);
+	}
+	return out;
+};
+
+// A property on the node, its object, or one of the object's modifiers
+// (mesh smoothing and collision live on a modifier).
+DazMcp.findPropDeep = function (node, labels) {
+	var p = DazMcp.findProp(node, labels);
+	var obj, i, n;
+	if (p) { return p; }
+	try { obj = node.getObject(); } catch (e) { obj = null; }
+	if (!obj) { return null; }
+	p = DazMcp.findProp(obj, labels);
+	if (p) { return p; }
+	try { n = obj.getNumModifiers(); } catch (e2) { n = 0; }
+	for (i = 0; i < n; i++) {
+		p = DazMcp.findProp(obj.getModifier(i), labels);
+		if (p) { return p; }
+	}
+	return null;
+};
+
+DazMcp.surfaceLabels = function (node) {
+	var out = [];
+	var shape, i;
+	try { shape = node.getObject().getCurrentShape(); } catch (e) { shape = null; }
+	if (!shape) { return out; }
+	for (i = 0; i < shape.getNumMaterials(); i++) { out.push(shape.getMaterial(i).getLabel()); }
+	return out;
+};
+
+DazMcp.boxInfo = function (box) {
+	if (!box) { return null; }
+	var r = function (v) { return [DazMcp.round(v[0], 2), DazMcp.round(v[1], 2), DazMcp.round(v[2], 2)]; };
+	return { min: r(box.min), max: r(box.max),
+		size: r([box.max[0] - box.min[0], box.max[1] - box.min[1], box.max[2] - box.min[2]]) };
 };

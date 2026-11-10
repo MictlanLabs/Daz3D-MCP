@@ -80,6 +80,7 @@ Combine `scene_info` with a capture:
 - `scene-building`: find content, place figures and props, cameras and lights.
 - `characters`: figures, character presets, shape dials, clothing, hair, poses.
 - `rendering`: Iray settings, test and final renders.
+- `third-party-assets`: .zip packages from other stores, OBJ/FBX import, imported garments as clothing.
 
 Agents without skills support read them with `daz_guide(topic)`.
 

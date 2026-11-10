@@ -13,7 +13,7 @@ from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from daz3d_mcp import __version__, scene_tools
+from daz3d_mcp import __version__, asset_tools, scene_tools
 from daz3d_mcp.client import DazClient
 from daz3d_mcp.paths import config_dir
 from daz3d_mcp.skills import get_skill, list_skills
@@ -28,8 +28,11 @@ To build scenes: content_search finds installed figures, clothing, hair, poses
 and props; content_load adds them (clothing, hair and poses need a target
 figure); figure_info, morph_set and pose_bones adjust characters; camera_create,
 light_create and environment_set set up the shot; render makes the final image.
+Content from other stores: package_inspect and package_install put a .zip into
+a content library; import_mesh brings in loose OBJ/FBX models;
+wearable_from_mesh makes an imported garment follow a figure.
 If your client has no skills, read the guides with daz_guide first: daz-basics,
-then scene-building, characters and rendering.
+then scene-building, characters, rendering and third-party-assets.
 run_script runs free DazScript (ES5 JavaScript) for anything the named tools
 do not cover; prefer the named tools when they exist.
 """
@@ -169,7 +172,8 @@ def create_server(client: DazClient | None = None) -> FastMCP:
             raise ToolError(f"No guide named {topic!r}. Call daz_guide without a topic to list them.")
         return skill.body
 
-    scene_tools.register(mcp, call, get_client)
+    forget_index = scene_tools.register(mcp, call, get_client)
+    asset_tools.register(mcp, call, get_client, forget_index)
 
     for skill in list_skills():
         _register_skill(mcp, skill.name, skill.description)
