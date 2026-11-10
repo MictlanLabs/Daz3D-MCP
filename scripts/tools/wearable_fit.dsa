@@ -1,0 +1,21 @@
+// Tool: wearable_fit
+// Fits clothing or hair to a figure (Daz "Fit To"), or unfits it.
+//
+// args:
+//   item   (string, required) label of the clothing or hair
+//   figure (string) label of the figure; omit or null to unfit
+
+function dazmcpTool(args) {
+	var item = DazMcp.requireNode(args.item, "item");
+	var fig = args.figure ? DazMcp.requireFigure(args.figure) : null;
+	if (!item.setFollowTarget) {
+		throw DazMcp.fail("bad_args", args.item + " is not a figure-based item and cannot be fitted.");
+	}
+	if (fig && DazMcp.same(fig, item)) { throw DazMcp.fail("bad_args", "An item cannot be fitted to itself."); }
+	item.setFollowTarget(fig);
+	if (fig) {
+		try { fig.addNodeChild(item, true); } catch (e) { /* follow target is what matters */ }
+	}
+	var t = item.getFollowTarget();
+	return { item: item.getLabel(), fitted_to: t ? t.getLabel() : null, type: DazMcp.nodeType(item) };
+}

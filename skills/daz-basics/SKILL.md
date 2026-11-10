@@ -75,6 +75,14 @@ Combine `scene_info` with a capture:
   missing-files dialog.
 - Saving with `scene_save` writes a scene `.duf`; it does not copy the assets.
 
+## More guides
+
+- `scene-building`: find content, place figures and props, cameras and lights.
+- `characters`: figures, character presets, shape dials, clothing, hair, poses.
+- `rendering`: Iray settings, test and final renders.
+
+Agents without skills support read them with `daz_guide(topic)`.
+
 ## run_script: when the named tools are not enough
 
 `run_script` runs DazScript, Daz Studio's JavaScript dialect, inside Daz. The

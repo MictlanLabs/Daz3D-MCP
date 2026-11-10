@@ -1,0 +1,22 @@
+// Tool: camera_create
+// Adds a camera. It can frame nodes (for example two figures) automatically.
+//
+// args:
+//   label        (string) default "Camera"
+//   position     [x, y, z] cm
+//   look_at      node label or [x, y, z]
+//   rotation     [x, y, z] degrees, when there is no look_at/frame
+//   frame        (string[]) labels to fit in the picture
+//   yaw, pitch   degrees around/above the framed nodes (0, 5 = in front, a bit above)
+//   margin       room around framed nodes, default 1.1
+//   focal_length mm, default 65
+//   make_active  (bool, default true) look through it in the viewport (renders use it)
+
+function dazmcpTool(args) {
+	var cam = new DzBasicCamera();
+	cam.setLabel(args.label || "Camera");
+	Scene.addNode(cam);
+	if (args.make_active === undefined) { args.make_active = true; }
+	return DazMcp.cameraApply(cam, args);
+}
+

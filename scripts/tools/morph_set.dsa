@@ -1,0 +1,35 @@
+// Tool: morph_set
+// Sets shape dials (morphs), for example {"Body Tone": 0.5, "Height": -0.2}.
+// Values are usually 0 to 1 (0 % to 100 %); some dials allow negatives.
+//
+// args:
+//   node   (string, required) label
+//   values (object, required) {label or name: value}
+
+function dazmcpTool(args) {
+	var node = DazMcp.requireNode(args.node, "node");
+	if (DazMcp.nodeType(node) === "bone") { node = DazMcp.ownerFigure(node); }
+	var values = args.values || {};
+	var all = DazMcp.morphList(node, { include_hidden: true, limit: 100000, raw: true }).raw;
+	var set = [];
+	var notFound = [];
+	var key, i, want, prop, hit, near;
+	for (key in values) {
+		if (!values.hasOwnProperty(key)) { continue; }
+		want = DazMcp.lower(key);
+		hit = null;
+		near = [];
+		for (i = 0; i < all.length; i++) {
+			prop = all[i].prop;
+			if (DazMcp.lower(prop.getLabel()) === want || DazMcp.lower(all[i].name) === want) { hit = prop; break; }
+			if (near.length < 8 && DazMcp.lower(prop.getLabel()).indexOf(want) >= 0) { near.push(prop.getLabel()); }
+		}
+		if (!hit) { notFound.push({ morph: key, similar: near }); continue; }
+		if (typeof values[key] !== "number") {
+			throw DazMcp.fail("bad_args", "The value for " + key + " must be a number.");
+		}
+		hit.setValue(values[key]);
+		set.push({ morph: hit.getLabel(), value: DazMcp.round(hit.getValue(), 4) });
+	}
+	return { node: node.getLabel(), set: set, not_found: notFound };
+}

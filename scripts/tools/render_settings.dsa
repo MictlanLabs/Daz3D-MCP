@@ -1,0 +1,13 @@
+// Tool: render_settings
+// Reads and optionally changes the render settings.
+//
+// args:
+//   width, height (int) image size in pixels
+//   max_samples   (int)   Iray stops after this many samples
+//   max_time      (number) Iray stops after this many seconds
+//   quality       (number) Iray "Rendering Quality" (1 = default, higher = slower)
+//   properties    {label: value} any other render setting
+
+function dazmcpTool(args) {
+	return DazMcp.applyRenderSettings(args);
+}

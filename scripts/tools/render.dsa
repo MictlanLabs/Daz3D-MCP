@@ -1,0 +1,67 @@
+// Tool: render
+// Renders the scene to an image file and waits until it is done.
+//
+// args:
+//   out_path     (string, required) .png or .jpg path
+//   preview_path (string) where to also save a small preview
+//   preview_size (int, default 1024)
+//   camera       (string) camera label; default: the active viewport camera
+//   width, height, max_samples, max_time, quality: as in render_settings
+
+function dazmcpTool(args) {
+	var outPath = args.out_path;
+	if (!outPath) { throw DazMcp.fail("bad_args", "out_path is required."); }
+	var dir = new DzFileInfo(outPath).path();
+	if (!new DzDir(dir).exists()) { throw DazMcp.fail("not_found", "Folder does not exist: " + dir); }
+
+	var settings = DazMcp.applyRenderSettings(args);
+	var v3d = DazMcp.viewport3d();
+	var previous = v3d ? v3d.getCamera() : null;
+	var camera = previous;
+	if (args.camera) {
+		camera = DazMcp.requireNode(args.camera, "camera");
+		if (DazMcp.nodeType(camera) !== "camera") { throw DazMcp.fail("bad_args", args.camera + " is not a camera."); }
+		if (v3d) { v3d.setCamera(camera); }
+	}
+
+	var mgr = App.getRenderMgr();
+	var opts = mgr.getRenderOptions();
+	try { opts.setRenderImgToId(DzRenderOptions.DirectToFile); } catch (e) { opts.renderImgToId = DzRenderOptions.DirectToFile; }
+	try { opts.setRenderImgFilename(outPath); } catch (e2) { opts.renderImgFilename = outPath; }
+	try { opts.setIsCurrentFrameRender(true); } catch (e3) { /* single frame is the default */ }
+
+	var started = new Date().getTime();
+	var ok = mgr.doRender(opts);
+	var seconds = (new Date().getTime() - started) / 1000;
+
+	if (args.camera && v3d && previous) { v3d.setCamera(previous); }
+
+	if (ok === false || !DazMcp.fileExists(outPath)) {
+		throw DazMcp.fail("render_failed", "The render did not produce " + outPath + ".",
+			{ renderer: settings.renderer });
+	}
+
+	var preview = null;
+	if (args.preview_path) {
+		try {
+			var img = new Image(outPath);
+			var size = args.preview_size || 1024;
+			if (img.width > size || img.height > size) {
+				var ratio = Math.min(size / img.width, size / img.height);
+				img = img.smoothScale(Math.round(img.width * ratio), Math.round(img.height * ratio));
+			}
+			img.save(args.preview_path);
+			if (DazMcp.fileExists(args.preview_path)) { preview = args.preview_path; }
+		} catch (e4) {
+			DazMcp.log("No preview: " + e4);
+		}
+	}
+
+	return {
+		path: outPath,
+		preview: preview,
+		camera: camera ? camera.getLabel() : null,
+		seconds: DazMcp.round(seconds, 1),
+		settings: settings
+	};
+}

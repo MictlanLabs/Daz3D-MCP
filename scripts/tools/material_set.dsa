@@ -1,0 +1,30 @@
+// Tool: material_set
+// Changes material properties on some or all surfaces of a node.
+//
+// args:
+//   node       (string, required) label
+//   surfaces   (string[]) surfaces to change; omit for all of them
+//   properties (object, required) {label: value}; value is a number, a bool,
+//              a color ([r, g, b] 0..1 or "#rrggbb"), an option name, or
+//              {"map": "/abs/image.png" or null, "value": x}
+
+function dazmcpTool(args) {
+	var node = DazMcp.requireNode(args.node, "node");
+	if (!args.properties) { throw DazMcp.fail("bad_args", "properties is required."); }
+	var mats = DazMcp.materialsOf(node, args.surfaces);
+	var changed = [];
+	var missing = {};
+	var i, k, r;
+	for (i = 0; i < mats.length; i++) {
+		r = DazMcp.setProps(mats[i], args.properties);
+		if (r.set.length) { changed.push({ surface: mats[i].getLabel() || mats[i].getName(), set: r.set }); }
+		for (k = 0; k < r.not_found.length; k++) { missing[r.not_found[k]] = (missing[r.not_found[k]] || 0) + 1; }
+	}
+	var notFound = [];
+	for (k in missing) {
+		if (missing.hasOwnProperty(k) && missing[k] === mats.length) { notFound.push(k); }
+	}
+	var out = { node: node.getLabel(), changed: changed, not_found_anywhere: notFound };
+	if (notFound.length) { out.hint = "material_list with all_properties=true shows the property labels this shader uses."; }
+	return out;
+}

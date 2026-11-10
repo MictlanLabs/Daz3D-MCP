@@ -1,0 +1,21 @@
+// Tool: content_libraries
+// The content library folders Daz Studio knows about (My Library, My DAZ 3D
+// Library...). The MCP server indexes and searches them itself, so a search
+// never blocks Daz Studio.
+
+function dazmcpTool(args) {
+	var mgr = App.getContentMgr();
+	var out = [];
+	var i, n;
+	n = mgr.getNumContentDirectories();
+	for (i = 0; i < n; i++) {
+		out.push({ path: String(mgr.getContentDirectoryPath(i)), kind: "daz" });
+	}
+	try {
+		n = mgr.getNumPoserDirectories();
+		for (i = 0; i < n; i++) {
+			out.push({ path: String(mgr.getPoserDirectoryPath(i)), kind: "poser" });
+		}
+	} catch (e) { /* not available */ }
+	return { libraries: out };
+}

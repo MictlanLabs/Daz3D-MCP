@@ -13,7 +13,7 @@ from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from daz3d_mcp import __version__
+from daz3d_mcp import __version__, scene_tools
 from daz3d_mcp.client import DazClient
 from daz3d_mcp.paths import config_dir
 from daz3d_mcp.skills import get_skill, list_skills
@@ -23,10 +23,15 @@ INSTRUCTIONS = """\
 Tools to control a running Daz Studio (3D characters and scenes).
 Start with daz_status, then scene_info to learn what is in the scene, and
 viewport_capture to look at it. Units are centimeters and Y is up.
-Never discard unsaved work without asking the user. Before larger tasks read
-the guide with daz_guide (topic "daz-basics") if your client has no skills.
+Never discard unsaved work without asking the user.
+To build scenes: content_search finds installed figures, clothing, hair, poses
+and props; content_load adds them (clothing, hair and poses need a target
+figure); figure_info, morph_set and pose_bones adjust characters; camera_create,
+light_create and environment_set set up the shot; render makes the final image.
+If your client has no skills, read the guides with daz_guide first: daz-basics,
+then scene-building, characters and rendering.
 run_script runs free DazScript (ES5 JavaScript) for anything the named tools
-do not cover yet; prefer the named tools when they exist.
+do not cover; prefer the named tools when they exist.
 """
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
@@ -51,9 +56,9 @@ def create_server(client: DazClient | None = None) -> FastMCP:
             state["client"] = DazClient()
         return state["client"]
 
-    async def call(tool: str, args: dict | None = None) -> Any:
+    async def call(tool: str, args: dict | None = None, timeout: float | None = None) -> Any:
         try:
-            return await anyio.to_thread.run_sync(lambda: get_client().run_tool(tool, args or {}))
+            return await anyio.to_thread.run_sync(lambda: get_client().run_tool(tool, args or {}, timeout))
         except DazError as exc:
             raise ToolError(str(exc)) from exc
 
@@ -163,6 +168,8 @@ def create_server(client: DazClient | None = None) -> FastMCP:
         if skill is None:
             raise ToolError(f"No guide named {topic!r}. Call daz_guide without a topic to list them.")
         return skill.body
+
+    scene_tools.register(mcp, call, get_client)
 
     for skill in list_skills():
         _register_skill(mcp, skill.name, skill.description)

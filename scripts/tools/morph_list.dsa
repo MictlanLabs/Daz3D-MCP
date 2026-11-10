@@ -1,0 +1,17 @@
+// Tool: morph_list
+// Lists the shape dials (morphs) of a figure or item.
+//
+// args:
+//   node         (string, required) label
+//   query        (string) words that must appear in the label, name or group
+//   only_nonzero (bool, default false) only dials that are not at 0
+//   include_hidden (bool, default false) include hidden helper morphs
+//   limit        (int, default 100)
+
+function dazmcpTool(args) {
+	var node = DazMcp.requireNode(args.node, "node");
+	if (DazMcp.nodeType(node) === "bone") { node = DazMcp.ownerFigure(node); }
+	var res = DazMcp.morphList(node, args);
+	res.node = node.getLabel();
+	return res;
+}

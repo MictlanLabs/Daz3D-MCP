@@ -1,0 +1,33 @@
+// Tool: pose_bones
+// Rotates bones of a figure, for fine adjustments after a pose preset.
+//
+// args:
+//   figure   (string, required) label
+//   bones    (object, required) {bone name or label: [x, y, z] degrees}
+//            axes depend on the bone; see the characters skill
+//   relative (bool, default false) add to the current rotation
+
+function dazmcpTool(args) {
+	var fig = DazMcp.requireFigure(args.figure);
+	var bones = args.bones || {};
+	var set = [];
+	var notFound = [];
+	var key, bone, rot, now;
+	for (key in bones) {
+		if (!bones.hasOwnProperty(key)) { continue; }
+		bone = DazMcp.findBone(fig, key);
+		if (!bone) { notFound.push(key); continue; }
+		rot = DazMcp.checkVec(bones[key], "rotation of " + key);
+		if (args.relative === true) {
+			now = DazMcp.transformOf(bone).rotation;
+			rot = [now[0] + rot[0], now[1] + rot[1], now[2] + rot[2]];
+		}
+		DazMcp.setTransform(bone, null, rot, null);
+		set.push({ bone: bone.getName(), rotation: DazMcp.transformOf(bone).rotation });
+	}
+	var out = { figure: fig.getLabel(), set: set, not_found: notFound };
+	if (notFound.length) {
+		out.hint = "figure_info with all_bones=true lists the bone names of this figure.";
+	}
+	return out;
+}

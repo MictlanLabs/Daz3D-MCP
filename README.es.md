@@ -2,15 +2,18 @@
 
 Permite que agentes de IA (Claude Code, Codex, Cursor, Antigravity, Gemini CLI,
 Claude Desktop, VS Code y cualquier cliente MCP) controlen **Daz Studio**:
-abrir y guardar escenas, describir lo que contienen, ver el viewport y ejecutar
-DazScript.
+abrir y guardar escenas, buscar el contenido instalado, crear personajes
+(forma, ropa, pelo, poses), preparar cámaras, luces y materiales, renderizar con
+Iray y ejecutar DazScript.
 
 > Proyecto open source independiente. No está afiliado ni respaldado por Daz 3D.
 > [Read in English](README.md)
 
-**Estado: v0.1 (etapa 1 de 4).** Funcionan escenas, captura del viewport y
-scripts. Personajes, carga de contenido, assets de terceros y animación llegan
-en las siguientes etapas.
+**Estado: v0.2 (etapa 2 de 4).** Funcionan escenas, biblioteca de contenido,
+personajes, cámaras, luces, materiales y render. Los assets de terceros y la
+animación llegan en las siguientes etapas. Las etapas 1 y 2 están probadas
+contra un Daz Studio simulado; sus pruebas de cierre en un Daz Studio 6 real
+siguen pendientes.
 
 ## Cómo funciona
 
@@ -72,10 +75,35 @@ script. Es más lento pero no necesita compilar nada.
 | `scene_open` | Abre o fusiona una escena `.duf` |
 | `scene_save` | Guarda en `.duf` (no sobrescribe otro archivo salvo que se pida) |
 | `viewport_capture` | Devuelve un PNG del viewport, opcionalmente desde una cámara o frame |
+| `content_libraries` | Lista las bibliotecas de contenido y cuántos archivos tiene el índice |
+| `content_search` | Busca figuras, personajes, ropa, pelo, poses, materiales, props y luces instalados |
+| `content_thumbnail` | Muestra la miniatura de un archivo de contenido |
+| `content_load` | Carga contenido; ajusta ropa y pelo, aplica poses, personajes y materiales a un objetivo |
+| `node_set` | Mueve, rota, escala, muestra/oculta, renombra o selecciona un nodo |
+| `node_delete` | Borra nodos (y lo que lleva puesto una figura) |
+| `figure_info` | Generación, altura, ropa, morphs en uso, huesos posados y superficies de una figura |
+| `morph_list` / `morph_set` | Busca y ajusta diales de forma |
+| `pose_bones` / `pose_reset` | Rota huesos / vuelve a la pose por defecto |
+| `wearable_fit` | Ajusta ropa o pelo a una figura, o lo desajusta |
+| `camera_create` / `camera_set` | Crea o cambia una cámara; puede encuadrar nodos sola |
+| `light_create` / `light_set` | Crea o cambia luces spot, point y distant |
+| `environment_set` | Domo de Iray, HDRI y sol-cielo |
+| `material_list` / `material_set` | Lee y cambia superficies (colores, rugosidad, texturas) |
+| `render_settings` | Tamaño de imagen y límites de Iray |
+| `render` | Renderiza a un archivo y devuelve la imagen |
 | `run_script` | Ejecuta DazScript para todo lo demás (se puede desactivar) |
 | `daz_guide` | Devuelve las skills como texto para agentes sin soporte de skills |
 
+Skills: `daz-basics`, `scene-building`, `characters`, `rendering`.
+
 Pruébalo: *"Abre ~/Documents/escena.duf en Daz, describe la escena y muéstrame una captura."*
+O: *"Monta una escena con dos personajes Genesis 9, vestidos y posados,
+conversando, y renderízala."*
+
+La búsqueda de contenido corre en el servidor MCP sobre un índice de los
+archivos de la biblioteca (`~/.daz3d-mcp/content-index.json`, se reconstruye
+cada 24 horas o con `refresh_index=true`), así que una búsqueda nunca congela
+Daz Studio.
 
 ## Configuración
 
@@ -87,6 +115,10 @@ Pruébalo: *"Abre ~/Documents/escena.duf en Daz, describe la escena y muéstrame
 | `transport` | `"auto"` | `auto`, `http` (solo plugin) o `file` (modo sin plugin) |
 | `daz_executable` | detectado | Ejecutable de Daz Studio, para el modo sin plugin |
 | `timeout` | `600` | Segundos de espera por petición |
+| `render_timeout` | `3600` | Segundos de espera por render |
+| `render_dir` | `~/.daz3d-mcp/renders` | Dónde van los renders sin ruta |
+| `content_libraries` | `[]` | Carpetas de biblioteca extra para buscar |
+| `content_index_max_age_hours` | `24` | Cada cuánto se reconstruye el índice de contenido |
 
 ## Seguridad
 

@@ -37,3 +37,13 @@ def bridge(daz_home, tmp_path):
     b = FakeBridge(daz_home, tmp_path / "fake-state.json").start()
     yield b
     b.stop()
+
+
+@pytest.fixture
+def content_library(tmp_path, monkeypatch) -> Path:
+    """A fake "My Library" that the fake Daz Studio reports as its content directory."""
+    from content_fixture import build_library
+
+    root = build_library(tmp_path / "My Library")
+    monkeypatch.setenv("DAZMCP_FAKE_CONTENT_DIRS", str(root))
+    return root

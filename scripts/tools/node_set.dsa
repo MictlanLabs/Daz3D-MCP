@@ -1,0 +1,48 @@
+// Tool: node_set
+// Moves, rotates, scales, shows/hides or renames a node.
+//
+// args:
+//   node          (string, required) label
+//   position      [x, y, z] cm, relative to the parent (world for root nodes)
+//   rotation      [x, y, z] degrees
+//   scale         number, 1 = 100 %
+//   relative      (bool) add position/rotation to the current values
+//   visible       (bool)
+//   label         (string) new label
+//   drop_to_floor (bool) move it up or down so its lowest point is at Y = 0
+//   select        (bool) make it the selected node
+
+function dazmcpTool(args) {
+	var node = DazMcp.requireNode(args.node, "node");
+	var pos = DazMcp.checkVec(args.position, "position");
+	var rot = DazMcp.checkVec(args.rotation, "rotation");
+	var now = DazMcp.transformOf(node);
+	var box, p;
+	if (args.relative === true) {
+		if (pos) { pos = [now.position[0] + pos[0], now.position[1] + pos[1], now.position[2] + pos[2]]; }
+		if (rot) { rot = [now.rotation[0] + rot[0], now.rotation[1] + rot[1], now.rotation[2] + rot[2]]; }
+	}
+	DazMcp.setTransform(node, pos, rot, args.scale);
+
+	if (args.drop_to_floor === true) {
+		box = DazMcp.bboxOf([node]);
+		if (box) {
+			p = node.getYPosControl();
+			p.setValue(p.getValue() - box.min[1]);
+		}
+	}
+	if (args.visible === true || args.visible === false) {
+		try { node.setVisible(args.visible); } catch (e) { node.getVisibilityControl().setValue(args.visible); }
+	}
+	if (args.label) { node.setLabel(args.label); }
+	if (args.select === true) { DazMcp.selectOnly(node); }
+
+	var out = DazMcp.transformOf(node);
+	out.label = node.getLabel();
+	out.visible = node.isVisible();
+	out.position_ws = DazMcp.vec(node.getWSPos());
+	box = DazMcp.bboxOf([node]);
+	if (box) { out.bbox_ws = { min: DazMcp.vec({ x: box.min[0], y: box.min[1], z: box.min[2] }),
+		max: DazMcp.vec({ x: box.max[0], y: box.max[1], z: box.max[2] }) }; }
+	return out;
+}

@@ -8,7 +8,7 @@
 
 var DazMcp = {};
 
-DazMcp.LIB_VERSION = "0.1.0";
+DazMcp.LIB_VERSION = "0.2.0";
 
 // ---------------------------------------------------------------- JSON ----
 // Daz Studio 4.x and 6 both ship a JSON object, but keep a tiny fallback so an
@@ -111,8 +111,9 @@ DazMcp.nodeType = function (node) {
 		} catch (e) { /* older API */ }
 		return "figure";
 	}
-	if (inh(node, "DzCamera")) { return "camera"; }
+	// DzLight inherits DzCamera, so test for lights first.
 	if (inh(node, "DzLight")) { return "light"; }
+	if (inh(node, "DzCamera")) { return "camera"; }
 	if (inh(node, "DzGroupNode")) { return "group"; }
 	if (inh(node, "DzSkeleton")) { return "skeleton"; }
 	try {
@@ -155,4 +156,643 @@ DazMcp.appInfo = function () {
 	try { info.platform = App.platform(); } catch (e) { /* not available */ }
 	try { info.headless = (App.getGraphicsMode() === DzApp.NoInterface); } catch (e2) { /* ignore */ }
 	return info;
+};
+
+
+// ======================================================= stage 2 helpers ==
+// Scenes and characters: nodes, figures, properties, cameras and lights.
+
+DazMcp.isArray = function (v) {
+	return Object.prototype.toString.call(v) === "[object Array]";
+};
+
+DazMcp.lower = function (s) {
+	return String(s === undefined || s === null ? "" : s).toLowerCase();
+};
+
+// Two script wrappers of one Daz object do not always compare equal.
+DazMcp.same = function (a, b) {
+	if (!a || !b) { return false; }
+	if (a === b) { return true; }
+	try { return a.getElementID() === b.getElementID(); } catch (e) { return false; }
+};
+
+DazMcp.labels = function (nodes, max) {
+	var out = [];
+	var i;
+	for (i = 0; i < nodes.length && out.length < (max || 40); i++) { out.push(nodes[i].getLabel()); }
+	return out;
+};
+
+// Like findNode, but throws a helpful error when the node is not there.
+DazMcp.requireNode = function (ref, what) {
+	var node, all, i, near;
+	if (!ref) { throw DazMcp.fail("bad_args", (what || "node") + " is required."); }
+	node = DazMcp.findNode(ref);
+	if (node) { return node; }
+	all = Scene.getNodeList();
+	near = [];
+	for (i = 0; i < all.length; i++) {
+		if (DazMcp.nodeType(all[i]) === "bone") { continue; }
+		if (DazMcp.lower(all[i].getLabel()) === DazMcp.lower(ref)) { return all[i]; }
+		if (DazMcp.lower(all[i].getLabel()).indexOf(DazMcp.lower(ref)) >= 0) { near.push(all[i].getLabel()); }
+	}
+	throw DazMcp.fail("not_found", "No node labeled " + ref + " in the scene.",
+		{ similar: near.slice(0, 10) });
+};
+
+// The figure that owns a bone, or that a clothing item is fitted to.
+DazMcp.ownerFigure = function (node) {
+	var type = DazMcp.nodeType(node);
+	var n = node;
+	var guard = 0;
+	if (type === "figure") { return node; }
+	if (type === "bone") {
+		try { if (node.getSkeleton && node.getSkeleton()) { return node.getSkeleton(); } } catch (e) { /* walk up */ }
+		while (n && DazMcp.nodeType(n) === "bone" && guard < 200) { n = n.getNodeParent(); guard++; }
+		return n;
+	}
+	if (type === "fitted_figure") { return node.getFollowTarget(); }
+	return null;
+};
+
+DazMcp.requireFigure = function (ref) {
+	var node = DazMcp.requireNode(ref, "figure");
+	var type = DazMcp.nodeType(node);
+	if (type === "figure" || type === "fitted_figure") { return node; }
+	if (type === "bone") { return DazMcp.ownerFigure(node); }
+	throw DazMcp.fail("bad_args", ref + " is a " + type + ", not a figure.");
+};
+
+DazMcp.selectOnly = function (node) {
+	Scene.selectAllNodes(false);
+	if (node) {
+		node.select(true);
+		try { Scene.setPrimarySelection(node); } catch (e) { /* older API: select() is enough */ }
+	}
+};
+
+// "Genesis 9", "Genesis 8.1 Female"... from the figure's internal name.
+DazMcp.generation = function (node) {
+	var name = node ? String(node.getName()) : "";
+	var m = /^Genesis(\d+)(?:_(\d+))?(Female|Male)?/i.exec(name);
+	if (!m) {
+		if (/^Genesis/i.test(name)) { return "Genesis"; }
+		return null;
+	}
+	return "Genesis " + m[1] + (m[2] ? "." + m[2] : "") + (m[3] ? " " + m[3] : "");
+};
+
+DazMcp.followers = function (figure) {
+	var all = Scene.getNodeList();
+	var out = [];
+	var i, t;
+	for (i = 0; i < all.length; i++) {
+		try {
+			t = all[i].getFollowTarget ? all[i].getFollowTarget() : null;
+			if (t && DazMcp.same(t, figure)) { out.push(all[i]); }
+		} catch (e) { /* not a figure */ }
+	}
+	return out;
+};
+
+DazMcp.wearableKind = function (node) {
+	var text = DazMcp.lower(node.getLabel() + " " + node.getName());
+	if (/hair|brows|lashes|beard|mustache|bangs|ponytail|braid/.test(text)) { return "hair"; }
+	return "clothing";
+};
+
+DazMcp.bones = function (figure) {
+	var out = [];
+	var i, n, kids;
+	try {
+		n = figure.getNumBones();
+		for (i = 0; i < n; i++) { if (figure.getBone(i)) { out.push(figure.getBone(i)); } }
+		return out;
+	} catch (e) { /* fall back to the node tree */ }
+	kids = figure.getNodeChildren(true);
+	for (i = 0; i < kids.length; i++) {
+		if (DazMcp.nodeType(kids[i]) === "bone") { out.push(kids[i]); }
+	}
+	return out;
+};
+
+DazMcp.findBone = function (figure, ref) {
+	var bones, i, want;
+	try { if (figure.findBone && figure.findBone(ref)) { return figure.findBone(ref); } } catch (e) { /* label next */ }
+	try { if (figure.findBoneByLabel && figure.findBoneByLabel(ref)) { return figure.findBoneByLabel(ref); } } catch (e2) { /* scan */ }
+	bones = DazMcp.bones(figure);
+	want = DazMcp.lower(ref);
+	for (i = 0; i < bones.length; i++) {
+		if (DazMcp.lower(bones[i].getName()) === want || DazMcp.lower(bones[i].getLabel()) === want) { return bones[i]; }
+	}
+	return null;
+};
+
+// ---------------------------------------------------------- properties ----
+DazMcp.findProp = function (element, labels) {
+	var i, j, p, n, want;
+	if (!element) { return null; }
+	if (!DazMcp.isArray(labels)) { labels = [labels]; }
+	for (j = 0; j < labels.length; j++) {
+		try { p = element.findPropertyByLabel(labels[j]); if (p) { return p; } } catch (e) { /* scan */ }
+		try { p = element.findProperty(labels[j]); if (p) { return p; } } catch (e2) { /* scan */ }
+	}
+	try { n = element.getNumProperties(); } catch (e3) { return null; }
+	for (j = 0; j < labels.length; j++) {
+		want = DazMcp.lower(labels[j]);
+		for (i = 0; i < n; i++) {
+			p = element.getProperty(i);
+			if (DazMcp.lower(p.getLabel()) === want || DazMcp.lower(p.getName()) === want) { return p; }
+		}
+	}
+	return null;
+};
+
+DazMcp.propType = function (p) {
+	var inh = DazMcp.inherits;
+	if (inh(p, "DzColorProperty")) { return "color"; }
+	if (inh(p, "DzEnumProperty")) { return "enum"; }
+	if (inh(p, "DzBoolProperty")) { return "bool"; }
+	if (inh(p, "DzImageProperty")) { return "image"; }
+	if (inh(p, "DzFileProperty") || inh(p, "DzStringProperty")) { return "string"; }
+	if (inh(p, "DzIntProperty")) { return "int"; }
+	if (inh(p, "DzFloatProperty") || inh(p, "DzNumericProperty")) { return "float"; }
+	return "other";
+};
+
+DazMcp.colorToArray = function (c) {
+	if (!c) { return null; }
+	var r = typeof c.red === "function" ? c.red() : c.red;
+	var g = typeof c.green === "function" ? c.green() : c.green;
+	var b = typeof c.blue === "function" ? c.blue() : c.blue;
+	return [DazMcp.round(r / 255), DazMcp.round(g / 255), DazMcp.round(b / 255)];
+};
+
+// [r, g, b] from 0 to 1, or "#rrggbb".
+DazMcp.toColor = function (v) {
+	var m;
+	if (typeof v === "string") {
+		m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(v);
+		if (!m) { throw DazMcp.fail("bad_args", "Colors are [r, g, b] from 0 to 1 or \"#rrggbb\" (got " + v + ")."); }
+		return new Color(parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16));
+	}
+	if (!DazMcp.isArray(v) || v.length < 3) {
+		throw DazMcp.fail("bad_args", "Colors are [r, g, b] from 0 to 1 or \"#rrggbb\".");
+	}
+	var c = function (x) { return Math.max(0, Math.min(255, Math.round(Number(x) * 255))); };
+	return new Color(c(v[0]), c(v[1]), c(v[2]));
+};
+
+DazMcp.mapPath = function (p) {
+	try {
+		var t = p.getMapValue();
+		return t ? String(t.getFilename()) : null;
+	} catch (e) {
+		return null;
+	}
+};
+
+DazMcp.propInfo = function (p) {
+	var type = DazMcp.propType(p);
+	var info = { label: p.getLabel(), name: p.getName(), type: type };
+	try {
+		if (type === "color") { info.value = DazMcp.colorToArray(p.getColorValue()); }
+		else if (type === "enum") { info.value = String(p.getStringValue()); info.index = p.getValue(); }
+		else if (type === "bool") { info.value = !!p.getBoolValue(); }
+		else if (type === "string") { info.value = String(p.getValue()); }
+		else if (type === "image") { info.value = null; }
+		else {
+			info.value = DazMcp.round(p.getValue(), 4);
+			try { info.min = DazMcp.round(p.getMin(), 4); info.max = DazMcp.round(p.getMax(), 4); } catch (e) { /* no limits */ }
+		}
+	} catch (e2) { info.value = null; }
+	try { if (p.isMappable && p.isMappable()) { info.map = DazMcp.mapPath(p); } } catch (e3) { /* not mappable */ }
+	return info;
+};
+
+// value: number, bool, string (enum item), color, or {map: path|null, value: x}.
+DazMcp.setPropValue = function (p, value) {
+	var type = DazMcp.propType(p);
+	var i, n, want, tex;
+	if (value !== null && typeof value === "object" && !DazMcp.isArray(value)) {
+		if (value.hasOwnProperty("map")) {
+			if (value.map === null || value.map === "") {
+				p.setMap(null);
+			} else {
+				if (!DazMcp.fileExists(value.map)) { throw DazMcp.fail("not_found", "Image not found: " + value.map); }
+				tex = App.getImageMgr().getImage(value.map);
+				p.setMap(tex);
+			}
+		}
+		if (value.hasOwnProperty("value")) { DazMcp.setPropValue(p, value.value); }
+		return DazMcp.propInfo(p);
+	}
+	if (type === "color") {
+		p.setColorValue(DazMcp.toColor(value));
+	} else if (type === "enum") {
+		if (typeof value === "number") {
+			p.setValue(value);
+		} else {
+			n = p.getNumItems();
+			want = DazMcp.lower(value);
+			for (i = 0; i < n; i++) {
+				if (DazMcp.lower(p.getItem(i)) === want) { p.setValue(i); return DazMcp.propInfo(p); }
+			}
+			throw DazMcp.fail("bad_args", p.getLabel() + " has no option " + value + ".");
+		}
+	} else if (type === "bool") {
+		try { p.setBoolValue(!!value); } catch (e) { p.setValue(value ? 1 : 0); }
+	} else if (type === "string") {
+		p.setValue(String(value));
+	} else {
+		if (typeof value !== "number") {
+			throw DazMcp.fail("bad_args", p.getLabel() + " needs a number (got " + DazMcp.toJson(value) + ").");
+		}
+		p.setValue(value);
+	}
+	return DazMcp.propInfo(p);
+};
+
+// Sets {label: value} on an element; returns {set: [...], not_found: [...]}.
+DazMcp.setProps = function (element, values) {
+	var out = { set: [], not_found: [] };
+	var key, p;
+	for (key in values) {
+		if (!values.hasOwnProperty(key)) { continue; }
+		p = DazMcp.findProp(element, key);
+		if (!p) { out.not_found.push(key); continue; }
+		out.set.push(DazMcp.setPropValue(p, values[key]));
+	}
+	return out;
+};
+
+// ------------------------------------------------------------ geometry ----
+DazMcp.toVec3 = function (a) {
+	return new DzVec3(Number(a[0]), Number(a[1]), Number(a[2]));
+};
+
+DazMcp.checkVec = function (v, what) {
+	if (v === undefined || v === null) { return null; }
+	if (!DazMcp.isArray(v) || v.length !== 3 || typeof v[0] !== "number" ||
+			typeof v[1] !== "number" || typeof v[2] !== "number") {
+		throw DazMcp.fail("bad_args", what + " must be [x, y, z] numbers.");
+	}
+	return v;
+};
+
+// World bounding box of nodes plus whatever is fitted to them.
+DazMcp.bboxOf = function (nodes) {
+	var min = null;
+	var max = null;
+	var i, j, list, box;
+	var grow = function (b) {
+		if (!b || !b.isValid()) { return; }
+		if (!min) { min = [b.min.x, b.min.y, b.min.z]; max = [b.max.x, b.max.y, b.max.z]; return; }
+		min = [Math.min(min[0], b.min.x), Math.min(min[1], b.min.y), Math.min(min[2], b.min.z)];
+		max = [Math.max(max[0], b.max.x), Math.max(max[1], b.max.y), Math.max(max[2], b.max.z)];
+	};
+	for (i = 0; i < nodes.length; i++) {
+		list = [nodes[i]].concat(DazMcp.followers(nodes[i]));
+		for (j = 0; j < list.length; j++) {
+			try { box = list[j].getWSBoundingBox(); grow(box); } catch (e) { /* no geometry */ }
+		}
+		if (!min) {
+			box = nodes[i].getWSPos();
+			min = [box.x, box.y, box.z];
+			max = [box.x, box.y, box.z];
+		}
+	}
+	if (!min) { return null; }
+	return { min: min, max: max,
+		center: [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2] };
+};
+
+// A point from [x, y, z] or from a node label (the center of its bounding box).
+DazMcp.resolvePoint = function (ref, what) {
+	if (DazMcp.isArray(ref)) { return DazMcp.checkVec(ref, what); }
+	var node = DazMcp.requireNode(ref, what);
+	var type = DazMcp.nodeType(node);
+	var p;
+	if (type === "bone" || type === "camera" || type === "light" || type === "node") {
+		p = node.getWSPos();
+		return [p.x, p.y, p.z];
+	}
+	return DazMcp.bboxOf([node]).center;
+};
+
+DazMcp.setTransform = function (node, pos, rot, scale) {
+	if (pos) {
+		node.getXPosControl().setValue(pos[0]);
+		node.getYPosControl().setValue(pos[1]);
+		node.getZPosControl().setValue(pos[2]);
+	}
+	if (rot) {
+		node.getXRotControl().setValue(rot[0]);
+		node.getYRotControl().setValue(rot[1]);
+		node.getZRotControl().setValue(rot[2]);
+	}
+	if (scale !== undefined && scale !== null) {
+		node.getScaleControl().setValue(scale);
+	}
+};
+
+DazMcp.transformOf = function (node) {
+	return {
+		position: [DazMcp.round(node.getXPosControl().getValue()), DazMcp.round(node.getYPosControl().getValue()),
+			DazMcp.round(node.getZPosControl().getValue())],
+		rotation: [DazMcp.round(node.getXRotControl().getValue()), DazMcp.round(node.getYRotControl().getValue()),
+			DazMcp.round(node.getZRotControl().getValue())],
+		scale: DazMcp.round(node.getScaleControl().getValue())
+	};
+};
+
+// Rotation (degrees) that points a camera or light at a target. Cameras and
+// lights look down their local -Z axis; Daz rotates them Y first, then X.
+DazMcp.aimRotation = function (from, to) {
+	var dx = to[0] - from[0];
+	var dy = to[1] - from[1];
+	var dz = to[2] - from[2];
+	var h = Math.sqrt(dx * dx + dz * dz);
+	var deg = 180 / Math.PI;
+	return [Math.atan2(dy, h) * deg, Math.atan2(-dx, -dz) * deg, 0];
+};
+
+DazMcp.renderAspect = function () {
+	var size = DazMcp.renderSize();
+	return size && size.height ? size.width / size.height : 16 / 9;
+};
+
+DazMcp.renderSize = function () {
+	var opts, s;
+	try {
+		opts = App.getRenderMgr().getRenderOptions();
+		s = opts.getImageSize ? opts.getImageSize() : opts.imageSize;
+		if (s) { return { width: s.width, height: s.height }; }
+	} catch (e) { /* default below */ }
+	return null;
+};
+
+DazMcp.setFocalLength = function (camera, mm) {
+	var p = DazMcp.findProp(camera, ["Focal Length", "Focal Length (mm)"]);
+	if (p) { p.setValue(mm); return; }
+	camera.setFocalLength(mm);
+};
+
+DazMcp.getFocalLength = function (camera) {
+	try { return camera.getFocalLength(); } catch (e) { /* property */ }
+	var p = DazMcp.findProp(camera, ["Focal Length"]);
+	return p ? p.getValue() : 65;
+};
+
+// Camera position that fits nodes in the frame.
+//   yaw:   degrees around the target; 0 = in front (+Z), 90 = on their left (+X)
+//   pitch: degrees above the target's center
+//   margin: 1.1 leaves 10% of room around them
+DazMcp.framePosition = function (box, focalMm, aspect, yaw, pitch, margin) {
+	var deg = Math.PI / 180;
+	var halfW = Math.atan(18 / focalMm);            // 36 mm wide frame
+	var halfH = Math.atan(18 / (aspect * focalMm));
+	var sx = box.max[0] - box.min[0];
+	var sy = box.max[1] - box.min[1];
+	var sz = box.max[2] - box.min[2];
+	var y = yaw * deg;
+	var p = pitch * deg;
+	var width = Math.abs(sx * Math.cos(y)) + Math.abs(sz * Math.sin(y));
+	var depth = Math.abs(sx * Math.sin(y)) + Math.abs(sz * Math.cos(y));
+	var height = sy * Math.cos(p) + depth * Math.abs(Math.sin(p));
+	var dist = Math.max((height / 2) / Math.tan(halfH), (width / 2) / Math.tan(halfW)) * margin + depth / 2;
+	var c = box.center;
+	return [c[0] + dist * Math.sin(y) * Math.cos(p), c[1] + dist * Math.sin(p), c[2] + dist * Math.cos(y) * Math.cos(p)];
+};
+
+DazMcp.viewport3d = function () {
+	try { return MainWindow.getViewportMgr().getActiveViewport().get3DViewport(); } catch (e) { return null; }
+};
+
+// Shared by camera_create/camera_set and light_create/light_set.
+DazMcp.placeAndAim = function (node, args, isCamera) {
+	var pos = DazMcp.checkVec(args.position, "position");
+	var target = null;
+	var box, focal;
+	if (isCamera && args.frame && args.frame.length) {
+		var frameNodes = [];
+		var i;
+		for (i = 0; i < args.frame.length; i++) { frameNodes.push(DazMcp.requireNode(args.frame[i], "frame")); }
+		box = DazMcp.bboxOf(frameNodes);
+		focal = DazMcp.getFocalLength(node);
+		if (!pos) {
+			pos = DazMcp.framePosition(box, focal, DazMcp.renderAspect(),
+				args.yaw || 0, args.pitch === undefined ? 5 : args.pitch, args.margin || 1.1);
+		}
+		target = box.center;
+	}
+	if (args.look_at !== undefined && args.look_at !== null) { target = DazMcp.resolvePoint(args.look_at, "look_at"); }
+	if (pos) { DazMcp.setTransform(node, pos, null, null); }
+	if (target) {
+		var from = pos;
+		if (!from) { var w = node.getWSPos(); from = [w.x, w.y, w.z]; }
+		DazMcp.setTransform(node, null, DazMcp.aimRotation(from, target), null);
+	} else if (args.rotation) {
+		DazMcp.setTransform(node, null, DazMcp.checkVec(args.rotation, "rotation"), null);
+	}
+	return target;
+};
+
+DazMcp.idOf = function (node) {
+	try { return String(node.getElementID()); } catch (e) { return node.getName() + "|" + node.getLabel(); }
+};
+
+DazMcp.cameraApply = function (cam, args) {
+	var target, v3d, out;
+	if (args.focal_length) { DazMcp.setFocalLength(cam, args.focal_length); }
+	target = DazMcp.placeAndAim(cam, args, true);
+	if (args.make_active === true) {
+		v3d = DazMcp.viewport3d();
+		if (v3d) { v3d.setCamera(cam); }
+	}
+	out = DazMcp.transformOf(cam);
+	out.label = cam.getLabel();
+	out.focal_length = DazMcp.round(DazMcp.getFocalLength(cam));
+	out.looking_at = target ? [DazMcp.round(target[0]), DazMcp.round(target[1]), DazMcp.round(target[2])] : null;
+	v3d = DazMcp.viewport3d();
+	out.active = !!(v3d && DazMcp.same(v3d.getCamera(), cam));
+	return out;
+};
+
+// --------------------------------------------------------------- morphs ----
+// Shape dials are the value properties of DzMorph modifiers on the object.
+//   opts.query, opts.only_nonzero, opts.include_hidden, opts.limit, opts.raw
+DazMcp.morphList = function (node, opts) {
+	var obj = null;
+	var out = [];
+	var raw = [];
+	var total = 0;
+	var words = opts.query ? DazMcp.lower(opts.query).split(/\s+/) : [];
+	var limit = opts.limit || 100;
+	var i, j, n, mod, prop, text, ok, val, group;
+	try { obj = node.getObject(); } catch (e) { obj = null; }
+	if (!obj) { return { morphs: [], total: 0, truncated: false, raw: [] }; }
+	n = obj.getNumModifiers();
+	for (i = 0; i < n; i++) {
+		mod = obj.getModifier(i);
+		if (!DazMcp.inherits(mod, "DzMorph")) { continue; }
+		prop = mod.getValueControl();
+		if (!prop) { continue; }
+		try { if (!opts.include_hidden && prop.isHidden()) { continue; } } catch (e2) { /* ignore */ }
+		val = prop.getValue();
+		if (opts.only_nonzero && Math.abs(val) < 1e-6) { continue; }
+		group = "";
+		try { group = String(prop.getPath()); } catch (e3) { group = ""; }
+		text = DazMcp.lower(prop.getLabel() + " " + mod.getName() + " " + group);
+		ok = true;
+		for (j = 0; j < words.length; j++) { if (words[j] && text.indexOf(words[j]) < 0) { ok = false; break; } }
+		if (!ok) { continue; }
+		total++;
+		if (opts.raw) { raw.push({ prop: prop, name: String(mod.getName()) }); continue; }
+		if (out.length >= limit) { continue; }
+		var entry = { label: prop.getLabel(), name: String(mod.getName()), group: group, value: DazMcp.round(val, 4) };
+		try { entry.min = DazMcp.round(prop.getMin(), 3); entry.max = DazMcp.round(prop.getMax(), 3); } catch (e4) { /* ignore */ }
+		out.push(entry);
+	}
+	return { morphs: out, total: total, truncated: total > out.length && !opts.raw, raw: raw };
+};
+
+// --------------------------------------------------------------- lights ----
+DazMcp.LIGHT_POWER = ["Luminous Flux (Lumen)", "Flux", "Luminous Flux", "Intensity"];
+
+DazMcp.lightApply = function (light, args) {
+	var res = { set: [], not_found: [] };
+	var p, k;
+	DazMcp.placeAndAim(light, args, false);
+	if (args.power !== undefined && args.power !== null) {
+		p = DazMcp.findProp(light, DazMcp.LIGHT_POWER);
+		if (p) { res.set.push(DazMcp.setPropValue(p, args.power)); } else { res.not_found.push("power"); }
+	}
+	if (args.color) {
+		p = DazMcp.findProp(light, ["Color", "Light Color"]);
+		if (p) { res.set.push(DazMcp.setPropValue(p, args.color)); } else { res.not_found.push("color"); }
+	}
+	if (args.spread_angle !== undefined && args.spread_angle !== null) {
+		p = DazMcp.findProp(light, ["Spread Angle"]);
+		if (p) { res.set.push(DazMcp.setPropValue(p, args.spread_angle)); } else { res.not_found.push("spread_angle"); }
+	}
+	if (args.properties) {
+		k = DazMcp.setProps(light, args.properties);
+		res.set = res.set.concat(k.set);
+		res.not_found = res.not_found.concat(k.not_found);
+	}
+	var out = DazMcp.transformOf(light);
+	out.label = light.getLabel();
+	out.class = DazMcp.className(light);
+	out.set = res.set;
+	out.not_found = res.not_found;
+	return out;
+};
+
+// ------------------------------------------------------- render settings ----
+// Iray settings live on the render element objects; the environment (dome,
+// HDRI) lives there too, or on an "Environment Options" node in newer scenes.
+DazMcp.renderElements = function () {
+	var out = [];
+	var i, all, list;
+	try {
+		list = App.getRenderMgr().getRenderElementObjects();
+		for (i = 0; i < list.length; i++) { out.push(list[i]); }
+	} catch (e) { /* none */ }
+	all = Scene.getNodeList();
+	for (i = 0; i < all.length; i++) {
+		if (DazMcp.inherits(all[i], "DzEnvironmentNode")) { out.unshift(all[i]); }
+	}
+	return out;
+};
+
+DazMcp.findRenderProp = function (labels) {
+	var els = DazMcp.renderElements();
+	var i, p;
+	for (i = 0; i < els.length; i++) {
+		p = DazMcp.findProp(els[i], labels);
+		if (p) { return p; }
+	}
+	return null;
+};
+
+DazMcp.RENDER_LABELS = {
+	max_samples: ["Max Samples"],
+	max_time: ["Max Time (secs)", "Max Time"],
+	quality: ["Rendering Quality"]
+};
+
+DazMcp.applyRenderSettings = function (args) {
+	var opts = App.getRenderMgr().getRenderOptions();
+	var notFound = [];
+	var key, p, r, size;
+	if (args.width || args.height) {
+		size = DazMcp.renderSize() || { width: 1920, height: 1080 };
+		var w = args.width || Math.round((args.height) * size.width / size.height);
+		var h = args.height || Math.round((args.width) * size.height / size.width);
+		try { opts.setAspectConstrained(false); } catch (e0) { /* ignore */ }
+		try { opts.setImageSize(new Size(w, h)); } catch (e) { opts.imageSize = new Size(w, h); }
+	}
+	if (args.quality !== undefined && args.quality !== null) {
+		p = DazMcp.findRenderProp(["Rendering Quality Enable"]);
+		if (p) { DazMcp.setPropValue(p, true); }
+	}
+	for (key in DazMcp.RENDER_LABELS) {
+		if (!DazMcp.RENDER_LABELS.hasOwnProperty(key) || args[key] === undefined || args[key] === null) { continue; }
+		p = DazMcp.findRenderProp(DazMcp.RENDER_LABELS[key]);
+		if (p) { DazMcp.setPropValue(p, args[key]); } else { notFound.push(key); }
+	}
+	if (args.properties) {
+		for (key in args.properties) {
+			if (!args.properties.hasOwnProperty(key)) { continue; }
+			p = DazMcp.findRenderProp([key]);
+			if (p) { DazMcp.setPropValue(p, args.properties[key]); } else { notFound.push(key); }
+		}
+	}
+
+	var out = { renderer: null, not_found: notFound };
+	try { out.renderer = String(App.getRenderMgr().getActiveRenderer().getName()); } catch (e2) { /* ignore */ }
+	size = DazMcp.renderSize();
+	if (size) { out.width = size.width; out.height = size.height; }
+	for (key in DazMcp.RENDER_LABELS) {
+		if (!DazMcp.RENDER_LABELS.hasOwnProperty(key)) { continue; }
+		p = DazMcp.findRenderProp(DazMcp.RENDER_LABELS[key]);
+		if (p) { out[key] = DazMcp.propInfo(p).value; }
+	}
+	return out;
+};
+
+// Materials of a node, optionally only the named surfaces.
+DazMcp.materialsOf = function (node, names) {
+	var shape = null;
+	var out = [];
+	var i, m, want, found, missing;
+	try { shape = node.getObject().getCurrentShape(); } catch (e) { shape = null; }
+	if (!shape) { throw DazMcp.fail("bad_args", node.getLabel() + " has no geometry, so it has no surfaces."); }
+	want = {};
+	if (names && names.length) {
+		for (i = 0; i < names.length; i++) { want[DazMcp.lower(names[i])] = names[i]; }
+	} else {
+		want = null;
+	}
+	found = {};
+	for (i = 0; i < shape.getNumMaterials(); i++) {
+		m = shape.getMaterial(i);
+		if (want && !want[DazMcp.lower(m.getLabel())] && !want[DazMcp.lower(m.getName())]) { continue; }
+		found[DazMcp.lower(m.getLabel())] = true;
+		found[DazMcp.lower(m.getName())] = true;
+		out.push(m);
+	}
+	if (want) {
+		missing = [];
+		for (i in want) { if (want.hasOwnProperty(i) && !found[i]) { missing.push(want[i]); } }
+		if (missing.length) {
+			var all = [];
+			for (i = 0; i < shape.getNumMaterials(); i++) { all.push(shape.getMaterial(i).getLabel()); }
+			throw DazMcp.fail("not_found", "No surface " + missing.join(", ") + " on " + node.getLabel() + ".",
+				{ surfaces: all });
+		}
+	}
+	return out;
 };

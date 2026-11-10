@@ -1,0 +1,15 @@
+// Tool: camera_set
+// Moves, aims or reframes an existing camera, or makes it the active one.
+// Same arguments as camera_create, plus:
+//   camera (string, required) label
+//   label  (string) new label
+// make_active defaults to false here.
+
+function dazmcpTool(args) {
+	var cam = DazMcp.requireNode(args.camera, "camera");
+	if (DazMcp.nodeType(cam) !== "camera") { throw DazMcp.fail("bad_args", args.camera + " is not a camera."); }
+	if (args.label) { cam.setLabel(args.label); }
+	if (args.make_active === undefined) { args.make_active = false; }
+	return DazMcp.cameraApply(cam, args);
+}
+

@@ -1,0 +1,27 @@
+// Tool: light_create
+// Adds a light.
+//
+// args:
+//   type         "spot" (default), "point" or "distant" (sun-like, only its rotation matters)
+//   label        (string)
+//   position     [x, y, z] cm
+//   look_at      node label or [x, y, z]
+//   rotation     [x, y, z] degrees, when there is no look_at
+//   power        lumens for spot/point lights (Iray default 1500), intensity for distant
+//   color        [r, g, b] 0..1 or "#rrggbb"
+//   spread_angle degrees, spot lights only
+//   properties   {label: value} any other light property
+
+function dazmcpTool(args) {
+	var type = args.type || "spot";
+	var light;
+	if (type === "spot") { light = new DzSpotLight(); }
+	else if (type === "point") { light = new DzPointLight(); }
+	else if (type === "distant") { light = new DzDistantLight(); }
+	else { throw DazMcp.fail("bad_args", "type must be spot, point or distant."); }
+	light.setLabel(args.label || (type.charAt(0).toUpperCase() + type.substring(1) + " Light"));
+	Scene.addNode(light);
+	var out = DazMcp.lightApply(light, args);
+	out.type = type;
+	return out;
+}

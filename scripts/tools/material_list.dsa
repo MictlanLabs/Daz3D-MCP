@@ -1,0 +1,40 @@
+// Tool: material_list
+// Lists the surfaces (materials) of a node with their main values.
+//
+// args:
+//   node     (string, required) label
+//   surfaces (string[]) only these surfaces
+//   all_properties (bool, default false) every property, not only the main ones
+//   query    (string) only properties whose label contains this text
+
+var MAIN = ["Base Color", "Diffuse Color", "Translucency Weight", "Glossy Layered Weight", "Glossy Roughness",
+	"Glossy Reflectivity", "Metallic Weight", "Cutout Opacity", "Normal Map", "Bump Strength",
+	"Refraction Weight", "Emission Color", "Top Coat Weight", "Dual Lobe Specular Weight"];
+
+function dazmcpTool(args) {
+	var node = DazMcp.requireNode(args.node, "node");
+	var mats = DazMcp.materialsOf(node, args.surfaces);
+	var out = [];
+	var i, j, m, props, p, q;
+	q = args.query ? DazMcp.lower(args.query) : null;
+	for (i = 0; i < mats.length; i++) {
+		m = mats[i];
+		props = [];
+		if (args.all_properties === true || q) {
+			for (j = 0; j < m.getNumProperties(); j++) {
+				p = m.getProperty(j);
+				if (q && DazMcp.lower(p.getLabel()).indexOf(q) < 0) { continue; }
+				props.push(DazMcp.propInfo(p));
+			}
+		} else {
+			for (j = 0; j < MAIN.length; j++) {
+				p = DazMcp.findProp(m, MAIN[j]);
+				if (p) { props.push(DazMcp.propInfo(p)); }
+			}
+		}
+		var shader = "";
+		try { shader = String(m.getMaterialName()); } catch (e) { shader = DazMcp.className(m); }
+		out.push({ surface: m.getLabel() || m.getName(), shader: shader, properties: props });
+	}
+	return { node: node.getLabel(), surfaces: out };
+}

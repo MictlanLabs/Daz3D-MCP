@@ -1,0 +1,54 @@
+// Tool: figure_info
+// Everything about one figure: generation, size, what it wears, its shape
+// (morphs in use), its pose (bones that are rotated) and its surfaces.
+//
+// args:
+//   figure      (string, required) label
+//   all_bones   (bool, default false) list every bone, not only the posed ones
+
+function dazmcpTool(args) {
+	var fig = DazMcp.requireFigure(args.figure);
+	var box = DazMcp.bboxOf([fig]);
+	var bones = DazMcp.bones(fig);
+	var posed = [];
+	var list = [];
+	var i, b, r, fitted, wearing, morphs, shape, mats;
+
+	for (i = 0; i < bones.length; i++) {
+		b = bones[i];
+		r = [DazMcp.round(b.getXRotControl().getValue(), 1), DazMcp.round(b.getYRotControl().getValue(), 1),
+			DazMcp.round(b.getZRotControl().getValue(), 1)];
+		if (r[0] || r[1] || r[2]) { posed.push({ bone: b.getName(), label: b.getLabel(), rotation: r }); }
+		if (args.all_bones === true) { list.push({ bone: b.getName(), label: b.getLabel() }); }
+	}
+
+	wearing = [];
+	fitted = DazMcp.followers(fig);
+	for (i = 0; i < fitted.length; i++) {
+		wearing.push({ label: fitted[i].getLabel(), kind: DazMcp.wearableKind(fitted[i]), visible: fitted[i].isVisible() });
+	}
+
+	morphs = DazMcp.morphList(fig, { only_nonzero: true, limit: 60 });
+	mats = [];
+	try {
+		shape = fig.getObject().getCurrentShape();
+		for (i = 0; i < shape.getNumMaterials(); i++) { mats.push(shape.getMaterial(i).getLabel()); }
+	} catch (e) { /* no geometry */ }
+
+	var out = {
+		label: fig.getLabel(),
+		name: fig.getName(),
+		type: DazMcp.nodeType(fig),
+		generation: DazMcp.generation(fig),
+		transform: DazMcp.transformOf(fig),
+		height_cm: box ? DazMcp.round(box.max[1] - box.min[1], 1) : null,
+		bone_count: bones.length,
+		wearing: wearing,
+		morphs_in_use: morphs.morphs,
+		posed_bones: posed,
+		surfaces: mats
+	};
+	if (out.type === "fitted_figure") { out.fitted_to = fig.getFollowTarget().getLabel(); }
+	if (args.all_bones === true) { out.bones = list; }
+	return out;
+}

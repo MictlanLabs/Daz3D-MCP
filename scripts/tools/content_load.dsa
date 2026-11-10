@@ -1,0 +1,82 @@
+// Tool: content_load
+// Loads a content file (.duf/.dsf preset) into the scene. Daz applies most
+// presets to the selected node, so this selects the target first:
+//   figure, prop, light, scene_subset  -> added to the scene (nothing selected,
+//                                        so it is not auto-fitted to anything)
+//   clothing, hair                     -> fitted to the target figure
+//   pose, character, shape             -> applied to the target figure
+//   material, properties, preset       -> applied to the target node
+//
+// args:
+//   path   (string, required) absolute path of the file
+//   kind   (string) what the file is, as content_search reports it
+//   target (string) node label the file applies to
+
+var NEEDS_TARGET = { clothing: 1, hair: 1, pose: 1, character: 1, shape: 1, material: 1, properties: 1, preset: 1 };
+var FIGURE_TARGET = { pose: 1, character: 1, shape: 1, clothing: 1, hair: 1 };
+
+function snapshot() {
+	var all = Scene.getNodeList();
+	var seen = {};
+	var i;
+	for (i = 0; i < all.length; i++) { seen[DazMcp.idOf(all[i])] = true; }
+	return seen;
+}
+
+function dazmcpTool(args) {
+	var path = args.path;
+	var kind = args.kind || "other";
+	var target = null;
+	var owner;
+	if (!path) { throw DazMcp.fail("bad_args", "path is required."); }
+	if (!DazMcp.fileExists(path)) { throw DazMcp.fail("not_found", "File not found: " + path); }
+	if (kind === "scene") {
+		throw DazMcp.fail("bad_args", "This file is a whole scene; open it with scene_open (merge=true adds it).");
+	}
+
+	if (args.target) {
+		target = DazMcp.requireNode(args.target, "target");
+		if (FIGURE_TARGET[kind]) {
+			owner = DazMcp.ownerFigure(target);
+			if (owner && DazMcp.nodeType(target) !== "figure") { target = owner; }
+			if (DazMcp.nodeType(target) !== "figure") {
+				throw DazMcp.fail("bad_args", "A " + kind + " file applies to a figure; " + args.target +
+					" is a " + DazMcp.nodeType(target) + ".");
+			}
+		}
+	} else if (NEEDS_TARGET[kind]) {
+		throw DazMcp.fail("bad_args", "A " + kind + " file needs target: the label of the node it applies to.");
+	}
+
+	var before = snapshot();
+	DazMcp.selectOnly(target);
+	var ok = App.getContentMgr().openFile(path, true);
+	if (ok === false) {
+		throw DazMcp.fail("load_failed", "Daz Studio could not load " + path + ".", { path: path });
+	}
+
+	var all = Scene.getNodeList();
+	var added = [];
+	var i, node, type, entry, t;
+	for (i = 0; i < all.length; i++) {
+		node = all[i];
+		if (before[DazMcp.idOf(node)]) { continue; }
+		type = DazMcp.nodeType(node);
+		if (type === "bone") { continue; }
+		entry = { label: node.getLabel(), type: type };
+		if (type === "fitted_figure") {
+			t = node.getFollowTarget();
+			entry.fitted_to = t ? t.getLabel() : null;
+			entry.kind = DazMcp.wearableKind(node);
+		}
+		if (type === "figure") { entry.generation = DazMcp.generation(node); }
+		added.push(entry);
+	}
+
+	var result = { loaded: path, kind: kind, target: target ? target.getLabel() : null, added: added };
+	if ((kind === "clothing" || kind === "hair") && added.length && !added[0].fitted_to) {
+		result.warning = "The item was added but is not fitted to " + target.getLabel() +
+			"; it may be made for another figure generation. Try wearable_fit.";
+	}
+	return result;
+}

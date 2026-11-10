@@ -25,6 +25,14 @@ class Settings:
     timeout: float = 600.0
     # How many viewport captures to keep in ~/.daz3d-mcp/captures.
     keep_captures: int = 20
+    # Seconds to wait for one render (renders can be much longer than other calls).
+    render_timeout: float = 3600.0
+    # Folder for renders when the agent gives no path (default ~/.daz3d-mcp/renders).
+    render_dir: str | None = None
+    # Content libraries to search when Daz Studio cannot list them.
+    content_libraries: list = field(default_factory=list)
+    # Hours before the content library index is rebuilt.
+    content_index_max_age_hours: float = 24.0
     extra: dict = field(default_factory=dict)
 
     @property
@@ -65,6 +73,8 @@ def load_settings() -> Settings:
         settings.transport = os.environ["DAZ3D_MCP_TRANSPORT"].strip().lower()
     if os.environ.get("DAZ3D_MCP_DAZ_EXECUTABLE"):
         settings.daz_executable = os.environ["DAZ3D_MCP_DAZ_EXECUTABLE"]
+    if os.environ.get("DAZ3D_MCP_RENDER_TIMEOUT"):
+        settings.render_timeout = float(os.environ["DAZ3D_MCP_RENDER_TIMEOUT"])
     if os.environ.get("DAZ3D_MCP_TIMEOUT"):
         settings.timeout = float(os.environ["DAZ3D_MCP_TIMEOUT"])
     return settings

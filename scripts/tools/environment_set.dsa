@@ -1,0 +1,50 @@
+// Tool: environment_set
+// Iray environment: the dome light around the scene, an HDRI image, or none.
+// Without arguments it only reports the current values.
+//
+// args:
+//   mode      "dome_and_scene" | "dome_only" | "sun_sky" | "scene_only"
+//   intensity number (1 = default)
+//   hdri      absolute path of an .hdr/.exr image, or "" to remove it
+//   rotation  degrees around Y
+//   draw_dome (bool) show the HDRI as the background
+
+var MODES = { dome_and_scene: 0, dome_only: 1, sun_sky: 2, scene_only: 3 };
+var LABELS = {
+	mode: ["Environment Mode"],
+	intensity: ["Environment Intensity"],
+	hdri: ["Environment Map"],
+	rotation: ["Dome Rotation"],
+	draw_dome: ["Draw Dome"]
+};
+
+function dazmcpTool(args) {
+	var set = [];
+	var notFound = [];
+	var key, p, value;
+	for (key in LABELS) {
+		if (!LABELS.hasOwnProperty(key) || args[key] === undefined || args[key] === null) { continue; }
+		p = DazMcp.findRenderProp(LABELS[key]);
+		if (!p) { notFound.push(key); continue; }
+		value = args[key];
+		if (key === "mode") {
+			if (!MODES.hasOwnProperty(value)) {
+				throw DazMcp.fail("bad_args", "mode must be dome_and_scene, dome_only, sun_sky or scene_only.");
+			}
+			p.setValue(MODES[value]);
+		} else if (key === "hdri") {
+			DazMcp.setPropValue(p, { map: value || null });
+		} else {
+			DazMcp.setPropValue(p, value);
+		}
+		set.push(key);
+	}
+	var now = {};
+	for (key in LABELS) {
+		if (!LABELS.hasOwnProperty(key)) { continue; }
+		p = DazMcp.findRenderProp(LABELS[key]);
+		if (!p) { continue; }
+		now[key] = key === "hdri" ? DazMcp.mapPath(p) : DazMcp.propInfo(p).value;
+	}
+	return { set: set, not_found: notFound, environment: now };
+}

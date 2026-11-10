@@ -1,0 +1,24 @@
+// Tool: light_set
+// Changes an existing light: same arguments as light_create, plus
+//   light (string, required) label
+//   label (string) new label
+//   on    (bool) switch it on or off
+
+function dazmcpTool(args) {
+	var light = DazMcp.requireNode(args.light, "light");
+	var p;
+	if (DazMcp.nodeType(light) !== "light") { throw DazMcp.fail("bad_args", args.light + " is not a light."); }
+	if (args.label) { light.setLabel(args.label); }
+	var out = DazMcp.lightApply(light, args);
+	if (args.on === true || args.on === false) {
+		p = DazMcp.findProp(light, ["Illumination", "On"]);
+		if (p) {
+			// Illumination is an enum: Off, On, On (no shadow)...
+			if (DazMcp.propType(p) === "enum") { p.setValue(args.on ? 1 : 0); } else { DazMcp.setPropValue(p, args.on); }
+			out.set.push(DazMcp.propInfo(p));
+		} else {
+			out.not_found.push("on");
+		}
+	}
+	return out;
+}

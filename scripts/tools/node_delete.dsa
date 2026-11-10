@@ -1,0 +1,31 @@
+// Tool: node_delete
+// Removes nodes from the scene. Deleting a figure also removes its bones;
+// clothing fitted to it is removed too when with_fitted is true.
+//
+// args:
+//   nodes       (string[], required) labels
+//   with_fitted (bool, default true) also delete what is fitted to a figure
+
+function dazmcpTool(args) {
+	var refs = args.nodes || [];
+	var withFitted = args.with_fitted !== false;
+	var list = [];
+	var deleted = [];
+	var i, j, node, extra;
+	if (!refs.length) { throw DazMcp.fail("bad_args", "nodes is required."); }
+	for (i = 0; i < refs.length; i++) {
+		node = DazMcp.requireNode(refs[i], "node");
+		if (DazMcp.nodeType(node) === "bone") {
+			throw DazMcp.fail("bad_args", refs[i] + " is a bone; delete its figure instead.");
+		}
+		list.push(node);
+		if (withFitted) {
+			extra = DazMcp.followers(node);
+			for (j = 0; j < extra.length; j++) { list.push(extra[j]); }
+		}
+	}
+	for (i = 0; i < list.length; i++) {
+		if (Scene.removeNode(list[i]) !== false) { deleted.push(list[i].getLabel()); }
+	}
+	return { deleted: deleted, node_count: Scene.getNumNodes() };
+}

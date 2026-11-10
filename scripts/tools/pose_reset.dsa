@@ -1,0 +1,24 @@
+// Tool: pose_reset
+// Puts every bone of a figure back to its default (zero) pose. The figure's
+// own position and rotation in the scene stay as they are.
+//
+// args:
+//   figure (string, required) label
+
+function dazmcpTool(args) {
+	var fig = DazMcp.requireFigure(args.figure);
+	var bones = DazMcp.bones(fig);
+	var i, b, controls, j, c, changed = 0;
+	for (i = 0; i < bones.length; i++) {
+		b = bones[i];
+		controls = [b.getXRotControl(), b.getYRotControl(), b.getZRotControl(),
+			b.getXPosControl(), b.getYPosControl(), b.getZPosControl()];
+		for (j = 0; j < controls.length; j++) {
+			c = controls[j];
+			var def = 0;
+			try { def = c.getDefaultValue(); } catch (e) { def = 0; }
+			if (c.getValue() !== def) { c.setValue(def); changed++; }
+		}
+	}
+	return { figure: fig.getLabel(), bones: bones.length, values_reset: changed };
+}
