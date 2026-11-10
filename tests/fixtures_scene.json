@@ -1,0 +1,15 @@
+{
+  "endFrame": 0,
+  "nodes": [
+    {"label": "Genesis 9", "name": "Genesis9", "class": "DzFigure", "geometry": true, "bones": 140,
+     "position": [0, 0, 0], "bbox": [[-42, 0, -15], [42, 178, 18]], "selected": true},
+    {"label": "Genesis 9 Toulouse Shirt", "name": "ToulouseShirt", "class": "DzFigure", "geometry": true,
+     "parent": "Genesis 9", "fitted_to": "Genesis 9", "bbox": [[-25, 100, -14], [25, 152, 16]]},
+    {"label": "hip", "name": "hip", "class": "DzBone", "parent": "Genesis 9", "position": [0, 105, 0]},
+    {"label": "Sofa", "name": "Sofa", "class": "DzNode", "geometry": true, "position": [0, 0, -200],
+     "rotation": [0, 180, 0], "bbox": [[-100, 0, -245], [100, 90, -155]]},
+    {"label": "Camera 1", "name": "Camera", "class": "DzBasicCamera", "position": [0, 160, 400], "focal_length": 50},
+    {"label": "Key Light", "name": "Distant Light", "class": "DzDistantLight", "position": [200, 300, 200],
+     "rotation": [-45, 45, 0]}
+  ]
+}

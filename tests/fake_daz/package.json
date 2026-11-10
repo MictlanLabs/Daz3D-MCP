@@ -1,0 +1,5 @@
+{
+  "private": true,
+  "description": "Test helpers that run Daz3D-MCP DazScript under Node.js",
+  "dependencies": { "acorn": "8.14.0" }
+}

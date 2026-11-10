@@ -1,0 +1,28 @@
+// Daz3D-MCP entry point.
+// Appended after core.dsa and one tool script. The bridge plugin calls
+// dazmcp_entry(argsJson) and sends the returned JSON string back to the MCP
+// server. The tool script must define dazmcpTool(args).
+
+function dazmcp_entry(argsJson) {
+	var response;
+	DazMcp._log = [];
+	try {
+		var args = DazMcp.fromJson(argsJson);
+		var result = dazmcpTool(args);
+		response = { ok: true, result: (result === undefined ? null : result) };
+	} catch (e) {
+		response = {
+			ok: false,
+			error: {
+				code: e.dazmcpCode || "script_error",
+				message: (e && e.message) ? e.message : String(e),
+				details: e.dazmcpDetails || null,
+				line: (e && e.lineNumber) ? e.lineNumber : null
+			}
+		};
+	}
+	if (DazMcp._log.length) {
+		response.log = DazMcp._log;
+	}
+	return DazMcp.toJson(response);
+}

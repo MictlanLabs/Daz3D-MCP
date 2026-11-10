@@ -1,0 +1,38 @@
+// Tool: scene_open
+// Opens a .duf scene (replacing the current one) or merges it into the scene.
+//
+// args:
+//   path            (string, required) absolute path to a .duf file
+//   merge           (bool, default false) add to the current scene instead of replacing it
+//   discard_changes (bool, default false) allow replacing a scene with unsaved changes
+
+function dazmcpTool(args) {
+	var path = args.path;
+	if (!path) {
+		throw DazMcp.fail("bad_args", "path is required.");
+	}
+	if (!DazMcp.fileExists(path)) {
+		throw DazMcp.fail("not_found", "File not found: " + path);
+	}
+	var merge = args.merge === true;
+	if (!merge && Scene.needsSave() && args.discard_changes !== true) {
+		throw DazMcp.fail("unsaved_changes",
+			"The current scene has unsaved changes. Save it first, merge, or pass discard_changes=true.",
+			{ filename: Scene.getFilename() || null });
+	}
+	if (!merge) {
+		// Clearing first avoids the "save changes?" dialog, which would block Daz.
+		Scene.clear();
+	}
+	var err = Scene.loadScene(path, merge ? DzScene.MergeFile : DzScene.OpenNew);
+	if (err !== 0x00000000 && err !== undefined && err !== null && err !== 0) {
+		throw DazMcp.fail("load_failed", "Daz Studio could not open the file (" + getErrorMessage(err) + ").",
+			{ path: path, error_code: err });
+	}
+	return {
+		opened: path,
+		merged: merge,
+		node_count: Scene.getNumNodes(),
+		frames: DazMcp.framesInfo()
+	};
+}

@@ -1,0 +1,48 @@
+[project]
+name = "daz3d-mcp"
+version = "0.1.0"
+description = "MCP server and skills that let AI agents control Daz Studio"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [{ name = "Daz3D-MCP contributors" }]
+keywords = ["daz", "daz3d", "daz studio", "mcp", "ai", "agents", "3d"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
+  "Topic :: Multimedia :: Graphics :: 3D Modeling",
+]
+dependencies = [
+  "mcp>=1.10,<2",
+]
+
+[project.urls]
+Homepage = "https://github.com/MictlanLabs/Daz3D-MCP"
+Issues = "https://github.com/MictlanLabs/Daz3D-MCP/issues"
+
+[project.scripts]
+daz3d-mcp = "daz3d_mcp.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/daz3d_mcp"]
+
+# The DazScript library and the skills live at the top of the repo so they are
+# easy to find; they are copied into the package when it is built.
+[tool.hatch.build.targets.wheel.force-include]
+"scripts" = "daz3d_mcp/_data/scripts"
+"skills" = "daz3d_mcp/_data/skills"
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "scripts", "skills", "tests", "README.md", "LICENSE"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

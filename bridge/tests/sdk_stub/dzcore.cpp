@@ -1,0 +1,1 @@
+void dzcore_stub() {}

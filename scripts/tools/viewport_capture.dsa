@@ -1,0 +1,101 @@
+// Tool: viewport_capture
+// Saves an image of the active 3D viewport to a PNG file chosen by the MCP
+// server, so the agent can see the scene.
+//
+// args:
+//   out_path (string, required) where to write the PNG
+//   max_size (int, default 1024) longest side of the image in pixels
+//   camera   (string, optional) camera label to look through for this capture
+//   frame    (int, optional) timeline frame to capture
+
+// Some graphics backends hand back an all-black frame instead of failing.
+// Treat a frame whose sampled pixels are all black as a failed read.
+function looksBlank(img) {
+	var x, y, c;
+	try {
+		for (x = 1; x < 6; x++) {
+			for (y = 1; y < 6; y++) {
+				c = img.pixel(Math.floor(img.width * x / 6), Math.floor(img.height * y / 6));
+				if (!c || c.red === undefined) { return false; } // unknown Color API: trust the image
+				if (c.red > 0 || c.green > 0 || c.blue > 0) { return false; }
+			}
+		}
+		return true;
+	} catch (e) {
+		return false; // pixel() not available: trust the image
+	}
+}
+
+function dazmcpTool(args) {
+	var outPath = args.out_path;
+	if (!outPath) {
+		throw DazMcp.fail("bad_args", "out_path is required.");
+	}
+	var maxSize = args.max_size || 1024;
+
+	var viewport = MainWindow.getViewportMgr().getActiveViewport();
+	if (!viewport) {
+		throw DazMcp.fail("no_viewport", "There is no active viewport (is Daz Studio running headless?).");
+	}
+	var v3d = viewport.get3DViewport();
+
+	var previousCamera = v3d.getCamera();
+	var previousFrame = Scene.getFrame();
+	var camera = null;
+	if (args.camera) {
+		camera = Scene.findCameraByLabel(args.camera) || Scene.findCamera(args.camera);
+		if (!camera) {
+			throw DazMcp.fail("not_found", "No camera named " + args.camera + ".");
+		}
+		v3d.setCamera(camera);
+	}
+	if (args.frame !== undefined && args.frame !== null) {
+		Scene.setFrame(args.frame);
+	}
+
+	var method = null;
+	var width = 0;
+	var height = 0;
+	var error = null;
+	try {
+		var img = v3d.captureImage();
+		if (img && !img.isNull() && img.width > 0 && !looksBlank(img)) {
+			if (img.width > maxSize || img.height > maxSize) {
+				var ratio = Math.min(maxSize / img.width, maxSize / img.height);
+				img = img.smoothScale(Math.round(img.width * ratio), Math.round(img.height * ratio));
+			}
+			img.save(outPath);
+			width = img.width;
+			height = img.height;
+			method = "captureImage";
+		}
+	} catch (e) {
+		error = String(e);
+	}
+
+	if (!method || !DazMcp.fileExists(outPath)) {
+		// Fallback for engines where the frame buffer cannot be read back
+		// (for example the Metal backend on macOS): a thumbnail-size render.
+		try {
+			Scene.saveThumbnailImage(outPath);
+			method = "saveThumbnailImage";
+		} catch (e2) {
+			error = (error ? error + "; " : "") + String(e2);
+		}
+	}
+
+	if (camera) { v3d.setCamera(previousCamera); }
+	if (args.frame !== undefined && args.frame !== null) { Scene.setFrame(previousFrame); }
+
+	if (!DazMcp.fileExists(outPath)) {
+		throw DazMcp.fail("capture_failed", "Could not capture the viewport.", { error: error });
+	}
+	return {
+		path: outPath,
+		method: method,
+		width: width || null,
+		height: height || null,
+		camera: (camera || previousCamera) ? (camera || previousCamera).getLabel() : null,
+		frame: (args.frame !== undefined && args.frame !== null) ? args.frame : previousFrame
+	};
+}

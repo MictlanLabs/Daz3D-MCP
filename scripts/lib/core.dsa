@@ -1,0 +1,158 @@
+// Daz3D-MCP core library.
+// Shared helpers that every tool script can use. The MCP server prepends this
+// file to each tool before sending it to Daz Studio.
+//
+// Compatibility rule: plain ES5 syntax only (no let/const, arrow functions,
+// template strings or classes) so the same code runs on the Qt Script engine of
+// Daz Studio 4.x and the newer engine of Daz Studio 6.
+
+var DazMcp = {};
+
+DazMcp.LIB_VERSION = "0.1.0";
+
+// ---------------------------------------------------------------- JSON ----
+// Daz Studio 4.x and 6 both ship a JSON object, but keep a tiny fallback so an
+// unexpected engine never breaks every tool at once.
+DazMcp.toJson = function (value) {
+	if (typeof JSON !== "undefined" && JSON.stringify) {
+		return JSON.stringify(value);
+	}
+	return DazMcp._stringify(value);
+};
+
+DazMcp.fromJson = function (text) {
+	if (text === undefined || text === null || text === "") {
+		return {};
+	}
+	if (typeof JSON !== "undefined" && JSON.parse) {
+		return JSON.parse(text);
+	}
+	// The text always comes from our own MCP server, never from a third party.
+	return eval("(" + text + ")");
+};
+
+DazMcp._stringify = function (v) {
+	var i, out, keys, k;
+	if (v === null || v === undefined) { return "null"; }
+	if (typeof v === "number") { return isFinite(v) ? String(v) : "null"; }
+	if (typeof v === "boolean") { return v ? "true" : "false"; }
+	if (typeof v === "string") {
+		return "\"" + v.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")
+			.replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t") + "\"";
+	}
+	if (v instanceof Array) {
+		out = [];
+		for (i = 0; i < v.length; i++) { out.push(DazMcp._stringify(v[i])); }
+		return "[" + out.join(",") + "]";
+	}
+	out = [];
+	for (k in v) {
+		if (v.hasOwnProperty(k) && typeof v[k] !== "function") {
+			out.push(DazMcp._stringify(String(k)) + ":" + DazMcp._stringify(v[k]));
+		}
+	}
+	return "{" + out.join(",") + "}";
+};
+
+// -------------------------------------------------------------- errors ----
+// Throw DazMcp.fail("code", "message") from a tool to return a clean error.
+DazMcp.fail = function (code, message, details) {
+	var e = new Error(message);
+	e.dazmcpCode = code;
+	e.dazmcpDetails = details || null;
+	return e;
+};
+
+// ------------------------------------------------------------- logging ----
+DazMcp._log = [];
+DazMcp.log = function (message) {
+	DazMcp._log.push(String(message));
+};
+
+// ------------------------------------------------------------- helpers ----
+DazMcp.round = function (n, digits) {
+	var f = Math.pow(10, digits === undefined ? 3 : digits);
+	return Math.round(n * f) / f;
+};
+
+DazMcp.vec = function (v) {
+	if (!v) { return null; }
+	return [DazMcp.round(v.x), DazMcp.round(v.y), DazMcp.round(v.z)];
+};
+
+DazMcp.inherits = function (obj, className) {
+	try {
+		return obj && obj.inherits && obj.inherits(className);
+	} catch (e) {
+		return false;
+	}
+};
+
+DazMcp.className = function (obj) {
+	try {
+		return obj.className();
+	} catch (e) {
+		return "";
+	}
+};
+
+DazMcp.fileExists = function (path) {
+	var info = new DzFileInfo(path);
+	return info.exists();
+};
+
+// Short, stable type name for a scene node.
+DazMcp.nodeType = function (node) {
+	var inh = DazMcp.inherits;
+	if (inh(node, "DzBone")) { return "bone"; }
+	if (inh(node, "DzFigure") || inh(node, "DzLegacyFigure")) {
+		try {
+			if (node.getFollowTarget && node.getFollowTarget()) { return "fitted_figure"; }
+		} catch (e) { /* older API */ }
+		return "figure";
+	}
+	if (inh(node, "DzCamera")) { return "camera"; }
+	if (inh(node, "DzLight")) { return "light"; }
+	if (inh(node, "DzGroupNode")) { return "group"; }
+	if (inh(node, "DzSkeleton")) { return "skeleton"; }
+	try {
+		if (node.getObject && node.getObject()) { return "prop"; }
+	} catch (e2) { /* ignore */ }
+	return "node";
+};
+
+DazMcp.nodeRef = function (node) {
+	if (!node) { return null; }
+	return { name: node.getName(), label: node.getLabel() };
+};
+
+// Find a node by label first (what users see), then by internal name.
+DazMcp.findNode = function (ref) {
+	var node = null;
+	if (!ref) { return null; }
+	node = Scene.findNodeByLabel(ref);
+	if (!node) { node = Scene.findNode(ref); }
+	return node;
+};
+
+DazMcp.framesInfo = function () {
+	var step = Scene.getTimeStep();
+	var range = Scene.getAnimRange();
+	var toFrame = function (t) { return step ? Math.round(t / step) : 0; };
+	return {
+		current: Scene.getFrame(),
+		start: toFrame(range.start),
+		end: toFrame(range.end)
+	};
+};
+
+DazMcp.appInfo = function () {
+	var info = {
+		app: "Daz Studio",
+		version: App.longVersionString,
+		lib_version: DazMcp.LIB_VERSION
+	};
+	try { info.platform = App.platform(); } catch (e) { /* not available */ }
+	try { info.headless = (App.getGraphicsMode() === DzApp.NoInterface); } catch (e2) { /* ignore */ }
+	return info;
+};

@@ -1,0 +1,93 @@
+// Tool: scene_info
+// Summarized description of the open scene: what is in it, where, and how big.
+//
+// args:
+//   include_bones  (bool, default false)  list figure bones as nodes too
+//   include_hidden (bool, default true)   include nodes hidden in the viewport
+//   max_nodes      (int,  default 200)    stop after this many nodes
+
+function dazmcpTool(args) {
+	var includeBones = args.include_bones === true;
+	var includeHidden = args.include_hidden !== false;
+	var maxNodes = args.max_nodes || 200;
+
+	var all = Scene.getNodeList();
+	var nodes = [];
+	var counts = {};
+	var truncated = false;
+	var i, node, type, parent, entry, box, followTarget;
+
+	for (i = 0; i < all.length; i++) {
+		node = all[i];
+		type = DazMcp.nodeType(node);
+		counts[type] = (counts[type] || 0) + 1;
+
+		if (type === "bone" && !includeBones) { continue; }
+		if (!includeHidden && !node.isVisible()) { continue; }
+		if (nodes.length >= maxNodes) { truncated = true; continue; }
+
+		parent = node.getNodeParent();
+		entry = {
+			label: node.getLabel(),
+			name: node.getName(),
+			type: type,
+			class: DazMcp.className(node),
+			parent: parent ? parent.getLabel() : null,
+			visible: node.isVisible(),
+			selected: node.isSelected(),
+			position_ws: DazMcp.vec(node.getWSPos()),
+			rotation: [
+				DazMcp.round(node.getXRotControl().getValue()),
+				DazMcp.round(node.getYRotControl().getValue()),
+				DazMcp.round(node.getZRotControl().getValue())
+			],
+			scale: DazMcp.round(node.getScaleControl().getValue())
+		};
+
+		if (type !== "bone" && type !== "camera" && type !== "light") {
+			try {
+				box = node.getWSBoundingBox();
+				if (box && box.isValid()) {
+					entry.bbox_ws = { min: DazMcp.vec(box.min), max: DazMcp.vec(box.max) };
+				}
+			} catch (e) { /* not every node has geometry */ }
+		}
+
+		if (type === "fitted_figure") {
+			try {
+				followTarget = node.getFollowTarget();
+				entry.fitted_to = followTarget ? followTarget.getLabel() : null;
+			} catch (e2) { /* ignore */ }
+		}
+
+		if (type === "figure" || type === "fitted_figure") {
+			try { entry.bone_count = node.getNumBones(); } catch (e3) { /* ignore */ }
+		}
+
+		if (type === "camera") {
+			try { entry.focal_length = DazMcp.round(node.getFocalLength()); } catch (e4) { /* ignore */ }
+		}
+
+		nodes.push(entry);
+	}
+
+	var selected = Scene.getPrimarySelection();
+	var viewCamera = null;
+	try {
+		viewCamera = MainWindow.getViewportMgr().getActiveViewport().get3DViewport().getCamera();
+	} catch (e5) { /* no interface */ }
+
+	return {
+		scene: {
+			filename: Scene.getFilename() || null,
+			modified: Scene.needsSave(),
+			frames: DazMcp.framesInfo(),
+			units: "cm, Y up",
+			primary_selection: DazMcp.nodeRef(selected),
+			viewport_camera: viewCamera ? viewCamera.getLabel() : null
+		},
+		counts: counts,
+		nodes: nodes,
+		truncated: truncated
+	};
+}

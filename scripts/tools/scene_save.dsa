@@ -1,0 +1,29 @@
+// Tool: scene_save
+// Saves the scene as .duf. Without a path it saves over the current file.
+//
+// args:
+//   path      (string, optional) absolute path; ".duf" is added when missing
+//   overwrite (bool, default false) allow replacing an existing file at path
+
+function dazmcpTool(args) {
+	var path = args.path || Scene.getFilename();
+	if (!path) {
+		throw DazMcp.fail("bad_args", "The scene has never been saved; pass an absolute path.");
+	}
+	if (!/\.duf$/i.test(path)) {
+		path = path + ".duf";
+	}
+	if (args.path && args.overwrite !== true && DazMcp.fileExists(path) && path !== Scene.getFilename()) {
+		throw DazMcp.fail("exists", "A file already exists at " + path + ". Pass overwrite=true to replace it.");
+	}
+	var dir = new DzFileInfo(path).path();
+	if (!new DzDir(dir).exists()) {
+		throw DazMcp.fail("not_found", "Folder does not exist: " + dir);
+	}
+	var err = Scene.saveScene(path);
+	if (err !== undefined && err !== null && err !== 0) {
+		throw DazMcp.fail("save_failed", "Daz Studio could not save the scene (" + getErrorMessage(err) + ").",
+			{ path: path, error_code: err });
+	}
+	return { saved: path };
+}

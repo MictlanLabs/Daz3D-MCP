@@ -1,0 +1,13 @@
+// Tool: status
+// Basic facts about the running Daz Studio and the open scene.
+
+function dazmcpTool(args) {
+	var info = DazMcp.appInfo();
+	info.scene = {
+		filename: Scene.getFilename() || null,
+		modified: Scene.needsSave(),
+		node_count: Scene.getNumNodes(),
+		frames: DazMcp.framesInfo()
+	};
+	return info;
+}

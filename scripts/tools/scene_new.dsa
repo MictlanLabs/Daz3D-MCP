@@ -1,0 +1,13 @@
+// Tool: scene_new
+// Clears the scene. Refuses when there are unsaved changes unless
+// discard_changes is true, so an agent never loses work by accident.
+
+function dazmcpTool(args) {
+	if (Scene.needsSave() && args.discard_changes !== true) {
+		throw DazMcp.fail("unsaved_changes",
+			"The current scene has unsaved changes. Save it first or pass discard_changes=true.",
+			{ filename: Scene.getFilename() || null });
+	}
+	Scene.clear();
+	return { cleared: true };
+}
