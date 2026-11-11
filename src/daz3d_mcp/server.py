@@ -31,6 +31,9 @@ place_on and fit_check put a posed figure on a chair, sofa or bed without
 floating or passing through it; face_expression, eyes_look_at and eye_color
 set expressions, where the eyes look and iris color; camera_create,
 light_create and environment_set set up the shot; render makes the final image.
+Dialogue scenes (visual novels): camera_shot frames a close-up, over the shoulder
+or two shot on a face, on one side of the line between the two speakers;
+render_shots renders a whole conversation, one image per line.
 Content from other stores: package_inspect and package_install put a .zip into
 a content library; import_mesh brings in loose OBJ/FBX models;
 wearable_from_mesh makes an imported garment follow a figure.
@@ -40,8 +43,8 @@ anim_import brings Mixamo FBX or mocap BVH onto a Genesis figure; anim_retime
 and anim_offset change speed, timing and place; anim_foot_contact and
 anim_preview check the result.
 If your client has no skills, read the guides with daz_guide first: daz-basics,
-then scene-building, characters, faces, furniture-poses, rendering, third-party-assets
-and animation.
+then scene-building, characters, faces, furniture-poses, dialogue-scenes,
+rendering, third-party-assets and animation.
 run_script runs free DazScript (ES5 JavaScript) for anything the named tools
 do not cover; prefer the named tools when they exist.
 """

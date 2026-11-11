@@ -12,7 +12,7 @@ import anyio
 from mcp.server.fastmcp import Context, FastMCP, Image
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import ToolAnnotations
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from daz3d_mcp.client import DazClient
 from daz3d_mcp.content import KINDS, ContentIndex, thumbnail_of
@@ -28,9 +28,47 @@ Color = Annotated[list[float] | str, Field(description="[r, g, b] from 0 to 1, o
 Target = Annotated[str | Vec3, Field(description="A node label (aims at its center) or [x, y, z] in cm.")]
 ContentKind = Literal[tuple(KINDS)]  # type: ignore[valid-type]
 
+Expression = Literal["neutral", "smile", "big_smile", "smirk", "sad", "angry", "surprised", "afraid", "disgusted",
+                     "pain", "wink", "eyes_closed", "mouth_open", "kiss"]
+ShotType = Literal["extreme_close_up", "close_up", "medium_close_up", "medium", "over_the_shoulder", "two_shot"]
+
 PREVIEW_MAX_BYTES = 8 * 1024 * 1024
 
 Call = Callable[..., Awaitable[Any]]
+
+
+class FaceSpec(BaseModel):
+    expression: Expression | None = None
+    strength: Annotated[float, Field(ge=0, le=1.5)] = 1
+    values: Annotated[dict[str, float] | None, Field(description="Extra face dials {label or name: value}.")] = None
+
+
+class GazeSpec(BaseModel):
+    target: Annotated[str | Vec3, Field(description="\"camera\" (into this shot's lens), a figure, a node or "
+                                                    "[x, y, z].")]
+    head: Annotated[float, Field(ge=0, le=1, description="Share of the turn the head takes.")] = 0
+
+
+class Beat(BaseModel):
+    """One moment of the conversation: a shot, plus faces and gazes set before it is rendered."""
+    name: Annotated[str, Field(min_length=1, max_length=48, pattern=r"^[A-Za-z0-9_.-]+$",
+                               description="File name part: NN_<name>.png.")]
+    subject: Annotated[str, Field(description="Figure the shot is about (usually who speaks or reacts).")]
+    shot: ShotType = "close_up"
+    partner: Annotated[str | None, Field(description="Who the subject talks to.")] = None
+    side: Literal["auto", "screen_left", "screen_right"] = "auto"
+    angle: Annotated[float | None, Field(ge=0, le=180)] = None
+    height: float | None = None
+    focal_length: Annotated[float | None, Field(ge=10, le=400)] = None
+    lead_room: Annotated[float | None, Field(ge=0, le=0.3)] = None
+    max_distance: Annotated[float | None, Field(gt=0)] = None
+    faces: Annotated[dict[str, Expression | FaceSpec] | None,
+                     Field(description="{figure: expression or {expression, strength, values}}. Faces not "
+                                       "named keep the previous beat's expression.")] = None
+    gaze: Annotated[dict[str, str | Vec3 | GazeSpec] | None,
+                    Field(description="{figure: target or {target, head}}; \"camera\" looks into the lens. "
+                                      "Figures not named keep where they looked.")] = None
+    line: Annotated[str | None, Field(description="Dialogue for this beat; only written to shots.json.")] = None
 
 
 def _abs(path: str) -> str:
@@ -243,9 +281,7 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient]) -> C
     @mcp.tool(annotations=CHANGES_SCENE)
     async def face_expression(
         figure: Annotated[str, Field(description="Figure label (Genesis 9 or Genesis 8 / 8.1).")],
-        expression: Annotated[Literal["neutral", "smile", "big_smile", "smirk", "sad", "angry", "surprised",
-                                      "afraid", "disgusted", "pain", "wink", "eyes_closed", "mouth_open",
-                                      "kiss"] | None,
+        expression: Annotated[Expression | None,
                               Field(description="Named expression; neutral only clears the face. Left/right "
                                                 "(smirk, wink) are the figure's own.")] = None,
         strength: Annotated[float, Field(ge=0, le=1.5, description="Multiplies the expression: 0.5 subtle, "
@@ -393,6 +429,40 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient]) -> C
         return await call("camera_set", _clean(camera=camera, frame=frame, yaw=yaw, pitch=pitch, margin=margin,
                                                position=position, look_at=look_at, rotation=rotation,
                                                focal_length=focal_length, make_active=make_active, label=label))
+
+    @mcp.tool(annotations=CHANGES_SCENE)
+    async def camera_shot(
+        subject: Annotated[str, Field(description="Figure whose face the shot is about.")],
+        shot: Annotated[ShotType, Field(description="extreme_close_up (eyes and mouth), close_up (head), "
+                                                    "medium_close_up (chest up), medium (waist up), "
+                                                    "over_the_shoulder (past the partner's head), two_shot "
+                                                    "(both).")] = "close_up",
+        partner: Annotated[str | None, Field(description="Figure the subject talks to; sets the eyeline. "
+                                                         "Needed for over_the_shoulder and two_shot.")] = None,
+        side: Annotated[Literal["auto", "screen_left", "screen_right"],
+                        Field(description="Where the subject looks on screen. auto keeps the camera on one "
+                                          "side of the line between the two (180 degree rule).")] = "auto",
+        angle: Annotated[float | None, Field(ge=0, le=180, description="Degrees between the eyeline and the "
+                                                                      "camera; 0 = straight on the eyeline, "
+                                                                      "90 = profile. Default per shot.")] = None,
+        height: Annotated[float | None, Field(description="cm above (+) or below (-) the eyes; above makes the "
+                                                          "subject look smaller, below more powerful.")] = None,
+        focal_length: Annotated[float | None, Field(ge=10, le=400, description="mm; default per shot.")] = None,
+        lead_room: Annotated[float, Field(ge=0, le=0.3, description="Share of the picture width the face moves "
+                                                                    "away from the side it looks to; 0 "
+                                                                    "centers it.")] = 0.12,
+        max_distance: Annotated[float | None, Field(gt=0, description="cm; keeps the camera this close to the "
+                                                                      "face (a small room, a wall behind it) "
+                                                                      "with a wider lens.")] = None,
+        camera: Annotated[str, Field(description="Camera label; created if missing.")] = "Shot",
+        make_active: bool = True,
+    ) -> dict:
+        """Places a camera for a film shot of a character's face (close-up, over the shoulder,
+        two shot...), aimed and sized from the face itself, on a consistent side of the line to the
+        person they talk to, so shots and reverse shots cut together. Reports heads in the way."""
+        return await call("camera_shot", _clean(subject=subject, shot=shot, partner=partner, side=side, angle=angle,
+                                                height=height, focal_length=focal_length, lead_room=lead_room,
+                                                max_distance=max_distance, camera=camera, make_active=make_active))
 
     # --------------------------------------------------------- lights ----
     @mcp.tool(annotations=CHANGES_SCENE)
@@ -656,6 +726,149 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient]) -> C
                 content.append(f"frame {f}")
                 content.append(Image(data=shown.read_bytes(), format="png" if suffix == ".png" else "jpeg"))
         content.append(json.dumps(result))
+        return content
+
+    @mcp.tool(annotations=CHANGES_SCENE, structured_output=False)
+    async def render_shots(
+        ctx: Context,
+        beats: Annotated[list[Beat], Field(min_length=1, max_length=200,
+                                           description="The conversation in order, one beat per image.")],
+        camera: Annotated[str, Field(description="Camera every beat uses (created if missing).")] = "Shot",
+        width: Annotated[int | None, Field(ge=16, le=16384)] = None,
+        height: Annotated[int | None, Field(ge=16, le=16384)] = None,
+        max_samples: Annotated[int | None, Field(ge=1, description="Per image.")] = None,
+        max_time: Annotated[float | None, Field(ge=1, description="Seconds per image. Set it: the total is "
+                                                                  "about beats x max_time.")] = None,
+        quality: Annotated[float | None, Field(gt=0)] = None,
+        out_dir: Annotated[str | None, Field(description="Absolute folder; default a new folder in "
+                                                         "~/.daz3d-mcp/renders/.")] = None,
+        image_format: Literal["png", "jpg"] = "png",
+        resume: Annotated[bool, Field(description="Keep images already in out_dir and render only the "
+                                                  "missing ones (faces, gazes and cameras are still set).")] = True,
+        only: Annotated[list[int] | None, Field(description="Render just these beat numbers (1-based), e.g. "
+                                                            "to redo one; the others still set their faces "
+                                                            "so the state carries over.")] = None,
+        previews: Annotated[int, Field(ge=0, le=12, description="Images to return.")] = 6,
+        preview_size: Annotated[int, Field(ge=64, le=2048)] = 384,
+    ) -> list:
+        """Renders a dialogue scene as a series of shots for a visual novel: for each beat it sets the
+        faces and gazes, frames the camera (camera_shot) and renders, into NN_<name> images plus a
+        shots.json listing every beat, its line and its camera. Waits until all are done; it takes
+        about beats x max_time, so render a few beats first and ask the user before a long run."""
+        settings = get_client().settings
+        if out_dir:
+            folder = Path(_abs(out_dir))
+        else:
+            base = Path(settings.render_dir).expanduser() if settings.render_dir else config_dir() / "renders"
+            folder = base / f"shots-{time.strftime('%Y%m%d-%H%M%S')}"
+        n_beats = len(beats)
+        wanted = set(only) if only else set(range(1, n_beats + 1))
+        bad = sorted(n for n in wanted if n < 1 or n > n_beats)
+        if bad:
+            raise ToolError(f"only has beat numbers outside 1..{n_beats}: {bad}.")
+        names = [b.name for b in beats]
+        if len(set(names)) != len(names):
+            raise ToolError("Every beat needs its own name.")
+        folder.mkdir(parents=True, exist_ok=True)
+        ext = "." + image_format
+        files = [folder / f"{i + 1:02d}_{b.name}{ext}" for i, b in enumerate(beats)]
+        if not resume:
+            taken = [p.name for i, p in enumerate(files) if i + 1 in wanted and p.exists()]
+            if taken:
+                raise ToolError(f"{len(taken)} images already exist in {folder} ({taken[0]}...). Pass "
+                                "resume=true to keep them, or another out_dir.")
+
+        used = await call("render_settings", _clean(width=width, height=height, max_samples=max_samples,
+                                                    max_time=max_time, quality=quality))
+        captures = config_dir() / "captures"
+        captures.mkdir(parents=True, exist_ok=True)
+        todo = [i for i in range(n_beats) if i + 1 in wanted and not files[i].exists()]
+        show = set(todo[:previews])
+        shown: dict[int, Path] = {}
+        manifest: list[dict[str, Any]] = []
+        warnings: list[str] = []
+        started = time.time()
+        rendered = 0
+
+        def target_of(spec: Any) -> Any:
+            return spec.target if isinstance(spec, GazeSpec) else spec
+
+        async def look(n: int, fig: str, spec: Any) -> None:
+            g = spec if isinstance(spec, GazeSpec) else GazeSpec(target=spec)
+            target = camera if g.target == "camera" else g.target
+            res = await call("eyes_look_at", {"figure": fig, "target": target, "head": g.head, "eyes": "both"})
+            if res.get("limited"):
+                warnings.append(f"beat {n}: {fig}'s eyes could not reach {g.target}; give it head 0.3-0.6.")
+
+        for i, b in enumerate(beats):
+            n = i + 1
+            for fig, spec in (b.faces or {}).items():
+                f = spec if isinstance(spec, FaceSpec) else FaceSpec(expression=spec)
+                await call("face_expression", _clean(figure=fig, expression=f.expression, strength=f.strength,
+                                                     values=f.values))
+            gaze = b.gaze or {}
+            for fig, spec in gaze.items():  # people first: a head turn moves the eyes the camera frames
+                if target_of(spec) != "camera":
+                    await look(n, fig, spec)
+            cam = await call("camera_shot", _clean(subject=b.subject, shot=b.shot, partner=b.partner, side=b.side,
+                                                   angle=b.angle, height=b.height, focal_length=b.focal_length,
+                                                   lead_room=b.lead_room, max_distance=b.max_distance,
+                                                   camera=camera, make_active=True))
+            for fig, spec in gaze.items():
+                if target_of(spec) == "camera":
+                    await look(n, fig, spec)
+            if cam.get("blocked_by"):
+                warnings.append(f"beat {n} ({b.name}): {', '.join(cam['blocked_by'])} in front of "
+                                f"{b.subject}'s face.")
+            entry: dict[str, Any] = {
+                "beat": n, "name": b.name, "file": files[i].name, "subject": b.subject, "partner": b.partner,
+                "shot": b.shot, "looks": cam.get("looks"), "line": b.line,
+                "camera": {k: cam.get(k) for k in ("position", "rotation", "focal_length", "looking_at")},
+            }
+            if i in todo:
+                args = _clean(out_path=files[i].as_posix(), camera=camera)
+                if i in show:
+                    pv = captures / f"shot-preview-{int(time.time() * 1000)}-{n}.png"
+                    args.update(preview_path=pv.as_posix(), preview_size=preview_size)
+                try:
+                    res = await call("render", args, timeout=settings.render_timeout)
+                except ToolError as exc:
+                    raise ToolError(f"Beat {n} ({b.name}) failed: {exc} {rendered} new images are in "
+                                    f"{folder}; call render_shots again with this out_dir to continue.") from exc
+                rendered += 1
+                if res.get("preview"):
+                    shown[i] = Path(res["preview"])
+                entry["seconds"] = res.get("seconds")
+                try:
+                    await ctx.report_progress(rendered, len(todo), f"beat {n} {b.name} ({rendered}/{len(todo)})")
+                except Exception:  # progress is optional; not every client asks for it
+                    pass
+            entry["exists"] = files[i].exists()
+            manifest.append(entry)
+
+        manifest_path = folder / "shots.json"
+        manifest_path.write_text(json.dumps({"camera": camera, "settings": used, "beats": manifest},
+                                            indent=2, ensure_ascii=False), encoding="utf-8")
+        result: dict[str, Any] = {
+            "folder": folder.as_posix(),
+            "beats": n_beats,
+            "rendered": rendered,
+            "kept": sum(1 for i in range(n_beats) if i + 1 in wanted and i not in todo),
+            "manifest": manifest_path.as_posix(),
+            "looks": [f"{e['beat']} {e['subject']}: {e['looks']}" for e in manifest],
+            "seconds": round(time.time() - started, 1),
+            "settings": used,
+        }
+        if warnings:
+            result["warnings"] = warnings
+        content: list = []
+        for i in sorted(shown):
+            p = shown[i]
+            suffix = p.suffix.lower()
+            if p.is_file() and p.stat().st_size <= PREVIEW_MAX_BYTES and suffix in (".png", ".jpg", ".jpeg"):
+                content.append(f"beat {i + 1} {beats[i].name}")
+                content.append(Image(data=p.read_bytes(), format="png" if suffix == ".png" else "jpeg"))
+        content.append(json.dumps(result, ensure_ascii=False))
         return content
 
     return forget

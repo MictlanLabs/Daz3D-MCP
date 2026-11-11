@@ -1,0 +1,212 @@
+// Tool: camera_shot
+// Frames a film shot on a character's face: extreme close-up, close-up,
+// medium close-up, medium, over the shoulder or a two shot. With a partner
+// (the one they talk to) it keeps the camera on one side of the line between
+// them (the 180 degree rule), so shot and reverse shot cut together.
+//
+// args:
+//   subject      (string, required) figure whose face the shot is about
+//   partner      (string) figure the subject talks to; sets the eyeline
+//   shot         "extreme_close_up" | "close_up" | "medium_close_up" | "medium" |
+//                "over_the_shoulder" | "two_shot"   (default "close_up")
+//   side         "auto" | "screen_left" | "screen_right": where the subject looks on
+//                screen (toward the partner). auto keeps one side of the line for the pair.
+//   angle        degrees between the eyeline and the camera (0 = on the eyeline,
+//                90 = profile); default per shot
+//   height       cm the camera sits above (+) or below (-) the subject's eyes
+//   focal_length mm; default per shot (over_the_shoulder works it out)
+//   lead_room    (0..0.3, default 0.12) share of the picture width the face moves away
+//                from the side it looks to (room to look into); 0 centers it
+//   max_distance (cm) keep the camera this close to its aim point (a small room, a wall
+//                behind it); a shorter lens keeps the framing
+//   camera       (string) camera label, created if missing (default "Shot")
+//   make_active  (bool, default true)
+
+var SHOTS = {
+	// frame: picture height in head heights; eyes: where the eyes sit from the top (0..1)
+	extreme_close_up: { frame: 0.6, eyes: 0.45, focal: 100, angle: 25 },
+	close_up: { frame: 1.5, eyes: 0.38, focal: 85, angle: 30 },
+	medium_close_up: { frame: 2.4, eyes: 0.3, focal: 70, angle: 30 },
+	medium: { frame: 3.8, eyes: 0.24, focal: 50, angle: 35 },
+	over_the_shoulder: { frame: 2.2, eyes: 0.33, focal: 0, angle: 0 },
+	two_shot: { frame: 3.6, eyes: 0.27, focal: 40, angle: 90 }
+};
+var EYES = { left: ["l_eye", "lEye"], right: ["r_eye", "rEye"] };
+var UP = [0, 1, 0];
+
+function v3(p) { return [p.x, p.y, p.z]; }
+function add(a, b) { return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]; }
+function sub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
+function mul(a, s) { return [a[0] * s, a[1] * s, a[2] * s]; }
+function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+function len(a) { return Math.sqrt(dot(a, a)); }
+function cross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+function flat(a) {
+	var h = [a[0], 0, a[2]];
+	var l = len(h);
+	return l < 1e-6 ? null : mul(h, 1 / l);
+}
+function r(a) { return [DazMcp.round(a[0], 1), DazMcp.round(a[1], 1), DazMcp.round(a[2], 1)]; }
+
+function bone(fig, names) {
+	for (var i = 0; i < names.length; i++) {
+		var b = DazMcp.findBone(fig, names[i]);
+		if (b) { return b; }
+	}
+	return null;
+}
+
+// Eyes, head size and where the face points, in world space.
+function faceOf(ref) {
+	var fig = DazMcp.requireFigure(ref);
+	var l = bone(fig, EYES.left), rt = bone(fig, EYES.right), head = bone(fig, ["head"]);
+	var eyes, ipd, fwd;
+	if (!head) { throw DazMcp.fail("not_found", fig.getLabel() + " has no head bone."); }
+	if (l && rt) {
+		eyes = mul(add(v3(l.getWSPos()), v3(rt.getWSPos())), 0.5);
+		ipd = len(sub(v3(l.getWSPos()), v3(rt.getWSPos())));
+	} else {
+		eyes = add(v3(head.getWSPos()), [0, 8, 0]);
+		ipd = 6.3;
+	}
+	if (ipd < 3 || ipd > 15) { ipd = 6.3; }
+	fwd = v3(head.getWSRot().multVec(new DzVec3(0, 0, 1)));
+	return { fig: fig, label: String(fig.getLabel()), eyes: eyes, head: ipd * 3.7, fwd: fwd };
+}
+
+// Distance of point p from the segment a-b.
+function segDist(p, a, b) {
+	var ab = sub(b, a);
+	var t = Math.max(0, Math.min(1, dot(sub(p, a), ab) / Math.max(dot(ab, ab), 1e-9)));
+	return len(sub(p, add(a, mul(ab, t))));
+}
+
+function dazmcpTool(args) {
+	var shotName = args.shot || "close_up";
+	var spec = SHOTS[shotName];
+	var deg = Math.PI / 180;
+	var S, P, g, n, s, side, angle, focal, aspect, halfV, halfW, frameH, target, pos, dist, c, w, m, ref, blocked;
+	var i, all, other, f, cam, out;
+	if (!spec) { throw DazMcp.fail("bad_args", "Unknown shot " + shotName + "."); }
+	S = faceOf(args.subject);
+	P = args.partner ? faceOf(args.partner) : null;
+	if (P && P.label === S.label) { throw DazMcp.fail("bad_args", "partner must be another figure."); }
+	if (!P && (shotName === "over_the_shoulder" || shotName === "two_shot")) {
+		throw DazMcp.fail("bad_args", shotName + " needs a partner.");
+	}
+
+	// g: where the subject looks (to the partner, or where the face points);
+	// n: the subject's left, seen along g.
+	g = P ? flat(sub(P.eyes, S.eyes)) : flat(S.fwd);
+	if (!g) {
+		throw DazMcp.fail("bad_args", S.label + " faces straight up or down; give a partner or turn the head.");
+	}
+	n = cross(UP, g);
+
+	// Which side of the line. Camera on the subject's left => they look screen left.
+	side = args.side || "auto";
+	if (side === "screen_left") { s = 1; } else if (side === "screen_right") { s = -1; } else if (P) {
+		// One world side for the pair: where both faces open to, else a fixed rule by label.
+		var first = S.label < P.label ? S : P, second = first === S ? P : S;
+		ref = cross(UP, flat(sub(second.eyes, first.eyes)));
+		w = flat(add(S.fwd, P.fwd));
+		m = w ? dot(w, ref) : 0;
+		if (Math.abs(m) > 0.1) { ref = mul(ref, m > 0 ? 1 : -1); }
+		s = dot(ref, n) >= 0 ? 1 : -1;
+	} else {
+		s = 1;
+	}
+
+	aspect = DazMcp.renderAspect();
+	angle = typeof args.angle === "number" ? args.angle : spec.angle;
+	frameH = spec.frame * S.head;
+	if (shotName === "two_shot") {
+		var mid = mul(add(S.eyes, P.eyes), 0.5);
+		var apart = len(sub([P.eyes[0], 0, P.eyes[2]], [S.eyes[0], 0, S.eyes[2]]));
+		frameH = spec.frame * Math.max(S.head, P.head);
+		focal = args.focal_length || spec.focal;
+		halfV = Math.atan(18 / (aspect * focal));
+		halfW = Math.atan(18 / focal);
+		target = sub(mid, mul(UP, frameH * (0.5 - spec.eyes)));
+		// across the line, turned by (90 - angle) toward the subject's side of the frame
+		c = add(mul(g, Math.cos(angle * deg)), mul(n, s * Math.sin(angle * deg)));
+		var across = Math.abs(dot(sub(P.eyes, S.eyes), cross(c, UP)));
+		dist = Math.max((frameH / 2) / Math.tan(halfV),
+			((Math.max(across, apart * 0.3) + 2.5 * S.head) / 2) / Math.tan(halfW));
+		if (args.max_distance && dist > args.max_distance) {
+			focal = Math.max(10, focal * args.max_distance / dist);
+			dist = args.max_distance;
+		}
+		pos = add(add(target, mul(c, dist)), mul(UP, args.height || 0));
+	} else if (shotName === "over_the_shoulder") {
+		// behind the partner's head, off to one side, looking past it at the subject
+		target = sub(S.eyes, mul(UP, frameH * (0.5 - spec.eyes)));
+		pos = add(add(P.eyes, mul(g, 32)), mul(n, s * 0.9 * P.head));
+		pos = add(pos, mul(UP, typeof args.height === "number" ? args.height : 4));
+		dist = len(sub(target, pos));
+		focal = args.focal_length || Math.max(24, Math.min(200, 18 * dist / (aspect * frameH / 2)));
+	} else {
+		focal = args.focal_length || spec.focal;
+		halfV = Math.atan(18 / (aspect * focal));
+		target = sub(S.eyes, mul(UP, frameH * (0.5 - spec.eyes)));
+		dist = (frameH / 2) / Math.tan(halfV);
+		if (args.max_distance && dist > args.max_distance) {
+			focal = Math.max(10, focal * args.max_distance / dist);
+			dist = args.max_distance;
+		}
+		c = add(mul(g, Math.cos(angle * deg)), mul(n, s * Math.sin(angle * deg)));
+		pos = add(add(target, mul(c, dist)), mul(UP, args.height || 0));
+	}
+
+	// Room to look into: move the face away from the side it looks to.
+	var lead = typeof args.lead_room === "number" ? Math.max(0, Math.min(0.3, args.lead_room)) : 0.12;
+	if (shotName !== "two_shot" && lead > 0) {
+		var view = sub(target, pos);
+		view = mul(view, 1 / len(view));
+		var gp = sub(g, mul(view, dot(g, view)));
+		if (len(gp) > 1e-3) {
+			gp = mul(gp, 1 / len(gp));
+			target = add(target, mul(gp, lead * frameH * aspect));
+		}
+	}
+
+	var label = args.camera || "Shot";
+	cam = DazMcp.findNode(label);
+	if (cam && DazMcp.nodeType(cam) !== "camera") { throw DazMcp.fail("bad_args", label + " is not a camera."); }
+	if (!cam) {
+		cam = new DzBasicCamera();
+		cam.setLabel(label);
+		Scene.addNode(cam);
+	}
+	out = DazMcp.cameraApply(cam, { position: pos, look_at: target, focal_length: focal,
+		make_active: args.make_active === undefined ? true : args.make_active });
+
+	// Other figures' heads between the camera and the subject's face.
+	blocked = [];
+	all = Scene.getNodeList();
+	for (i = 0; i < all.length; i++) {
+		if (DazMcp.nodeType(all[i]) !== "figure") { continue; }
+		if (String(all[i].getLabel()) === S.label) { continue; }
+		if (shotName === "over_the_shoulder" && P && String(all[i].getLabel()) === P.label) { continue; }
+		if (shotName === "two_shot" && P && String(all[i].getLabel()) === P.label) { continue; }
+		try { other = faceOf(all[i].getLabel()); } catch (e) { continue; }
+		f = segDist(other.eyes, pos, S.eyes);
+		if (f < 0.6 * other.head) { blocked.push(other.label); }
+	}
+
+	out.camera = out.label;
+	delete out.label;
+	out.shot = shotName;
+	out.subject = S.label;
+	if (P) { out.partner = P.label; }
+	out.looks = s > 0 ? "screen_left" : "screen_right";
+	out.angle = shotName === "over_the_shoulder" ? null : angle;
+	out.distance_cm = DazMcp.round(len(sub(target, pos)), 1);
+	out.subject_eyes = r(S.eyes);
+	if (blocked.length) {
+		out.blocked_by = blocked;
+		out.hint = "These heads are between the camera and " + S.label + "'s face. Raise angle, " +
+			"use over_the_shoulder, or move the camera with height.";
+	}
+	return out;
+}

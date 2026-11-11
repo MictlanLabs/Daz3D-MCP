@@ -110,16 +110,18 @@ script. Es más lento pero no necesita compilar nada.
 | `anim_preset_list` / `anim_preset_save` / `anim_preset_apply` | Presets de animación: incluidos, propios (en bucle, repetidos) y .duf comprados |
 | `anim_file_inspect` / `anim_import` | Lee un BVH o FBX binario (Mixamo, CMU...) y lo adapta a una figura Genesis con un mapa de huesos |
 | `camera_create` / `camera_set` | Crea o cambia una cámara; puede encuadrar nodos sola |
+| `camera_shot` | Encuadra un plano de cine sobre una cara (primer plano, sobre el hombro, plano a dos) respetando la regla de 180 grados |
 | `light_create` / `light_set` | Crea o cambia luces spot, point y distant |
 | `environment_set` | Domo de Iray, HDRI y sol-cielo |
 | `material_list` / `material_set` | Lee y cambia superficies (colores, rugosidad, texturas) |
 | `render_settings` | Tamaño de imagen y límites de Iray |
 | `render` | Renderiza a un archivo y devuelve la imagen |
+| `render_shots` | Renderiza una conversación como serie de planos (caras, miradas y cámara por línea) para novelas visuales |
 | `render_animation` | Renderiza cada cuadro de la animación y los une en un MP4 o GIF |
 | `run_script` | Ejecuta DazScript para todo lo demás (se puede desactivar) |
 | `daz_guide` | Devuelve las skills como texto para agentes sin soporte de skills |
 
-Skills: `daz-basics`, `scene-building`, `characters`, `faces`, `furniture-poses`, `rendering`, `third-party-assets`, `animation`.
+Skills: `daz-basics`, `scene-building`, `characters`, `faces`, `furniture-poses`, `dialogue-scenes`, `rendering`, `third-party-assets`, `animation`.
 
 Pruébalo: *"Abre ~/Documents/escena.duf en Daz, describe la escena y muéstrame una captura."*
 O: *"Monta una escena con dos personajes Genesis 9, vestidos y posados,

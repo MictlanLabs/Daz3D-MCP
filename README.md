@@ -108,16 +108,18 @@ It is slower but needs nothing compiled.
 | `anim_preset_list` / `anim_preset_save` / `anim_preset_apply` | Animation presets: built-in, your own (looping, repeated) and bought .duf ones |
 | `anim_file_inspect` / `anim_import` | Reads a BVH or binary FBX (Mixamo, CMU...) and adapts it to a Genesis figure with a bone map |
 | `camera_create` / `camera_set` | Adds or changes a camera; can frame nodes automatically |
+| `camera_shot` | Frames a film shot on a face (close-up, over the shoulder, two shot) keeping the 180 degree rule |
 | `light_create` / `light_set` | Adds or changes spot, point and distant lights |
 | `environment_set` | Iray dome, HDRI and sun-sky |
 | `material_list` / `material_set` | Reads and changes surfaces (colors, roughness, texture maps) |
 | `render_settings` | Image size and Iray limits |
 | `render` | Renders to a file and returns the image |
+| `render_shots` | Renders a conversation as a series of shots (faces, gazes and camera per line) for visual novels |
 | `render_animation` | Renders every frame of the animation and joins them into an MP4 or GIF |
 | `run_script` | Runs DazScript for anything else (can be disabled) |
 | `daz_guide` | Returns the skills as text for agents without skills support |
 
-Skills: `daz-basics`, `scene-building`, `characters`, `faces`, `furniture-poses`, `rendering`, `third-party-assets`, `animation`.
+Skills: `daz-basics`, `scene-building`, `characters`, `faces`, `furniture-poses`, `dialogue-scenes`, `rendering`, `third-party-assets`, `animation`.
 
 Try it: *"Open ~/Documents/scene.duf in Daz, describe the scene and show me a capture."*
 Or: *"Build a scene with two Genesis 9 characters, dressed and posed, talking
