@@ -205,7 +205,8 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient]) -> C
         include_hidden: bool = False,
         limit: Annotated[int, Field(ge=1, le=1000)] = 100,
     ) -> dict:
-        """Lists the shape dials (morphs) of a figure with their value and range."""
+        """Lists the dials of a figure with their value and range: shape morphs and the figure's pose
+        and face controls (Eye Blink, Jaw Open, Brow Up...; marked control=true)."""
         return await call("morph_list", _clean(node=node, query=query, only_nonzero=only_nonzero,
                                                include_hidden=include_hidden, limit=limit))
 
@@ -214,7 +215,8 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient]) -> C
         node: Annotated[str, Field(description="Figure (or item) label.")],
         values: Annotated[dict[str, float], Field(description="{dial label or name: value}, usually 0 to 1.")],
     ) -> dict:
-        """Sets shape dials (morphs), e.g. {"Body Tone": 0.5}. Unknown dials come back with similar names."""
+        """Sets dials (shape morphs or pose/face controls), e.g. {"Body Tone": 0.5, "Eye Blink": 1}.
+        Unknown dials come back with similar names."""
         return await call("morph_set", {"node": node, "values": values})
 
     @mcp.tool(annotations=CHANGES_SCENE)
@@ -236,6 +238,62 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient]) -> C
     async def pose_reset(figure: Annotated[str, Field(description="Figure label.")]) -> dict:
         """Returns all the bones of a figure to the default pose."""
         return await call("pose_reset", {"figure": figure})
+
+    # ---------------------------------------------------------- faces ----
+    @mcp.tool(annotations=CHANGES_SCENE)
+    async def face_expression(
+        figure: Annotated[str, Field(description="Figure label (Genesis 9 or Genesis 8 / 8.1).")],
+        expression: Annotated[Literal["neutral", "smile", "big_smile", "smirk", "sad", "angry", "surprised",
+                                      "afraid", "disgusted", "pain", "wink", "eyes_closed", "mouth_open",
+                                      "kiss"] | None,
+                              Field(description="Named expression; neutral only clears the face. Left/right "
+                                                "(smirk, wink) are the figure's own.")] = None,
+        strength: Annotated[float, Field(ge=0, le=1.5, description="Multiplies the expression: 0.5 subtle, "
+                                                                   "1 full.")] = 1,
+        values: Annotated[dict[str, float] | None,
+                          Field(description="Face dials to set after the expression, {label or name: value}, "
+                                            "e.g. {\"Brow Inner Up Left\": 0.4}.")] = None,
+        reset: Annotated[bool, Field(description="Clear face dials and face bones first.")] = True,
+    ) -> dict:
+        """Sets a facial expression (smile, sad, angry, surprised, wink...) from the FACS face dials,
+        or face dials by name; clears the previous expression first."""
+        return await call("face_expression", _clean(figure=figure, expression=expression, strength=strength,
+                                                    values=values, reset=reset))
+
+    @mcp.tool(annotations=CHANGES_SCENE)
+    async def eyes_look_at(
+        figure: Annotated[str, Field(description="Figure label.")],
+        target: Annotated[str | Vec3, Field(description="A camera (look into the lens), another figure (its "
+                                                        "eyes), a node, or [x, y, z] in cm.")],
+        head: Annotated[float, Field(ge=0, le=1, description="Share of the turn the head takes first; 0 = "
+                                                             "only the eyes move.")] = 0,
+        eyes: Literal["both", "left", "right"] = "both",
+    ) -> dict:
+        """Aims a figure's eyes at a camera, another figure or a point, within the eye joint limits
+        (about 30 degrees); head > 0 turns the head part of the way too."""
+        return await call("eyes_look_at", {"figure": figure, "target": target, "head": head, "eyes": eyes})
+
+    @mcp.tool(annotations=CHANGES_SCENE)
+    async def eye_color(
+        figure: Annotated[str, Field(description="Figure label.")],
+        color: Annotated[Color | None, Field(description="Iris color; the whites of the eyes stay white.")] = None,
+        iris: Annotated[int | None, Field(ge=1, le=16, description="Genesis 9 only: iris image 1-16 (1 hazel, 2 "
+                                                                   "grey-brown, 3 light grey, 4 amber, 5 dark "
+                                                                   "brown, 6 gold, 7 pale grey-blue, 8 hazel-gold, "
+                                                                   "9 grey-green, 10 blue-grey, 11 violet "
+                                                                   "fantasy, 12 blue with gold, 13 blue, 14 grey "
+                                                                   "freckled, 15 green, 16 light brown).")] = None,
+        keep_iris: Annotated[bool, Field(description="Tint the current iris instead of switching to light "
+                                                     "grey (3) first.")] = False,
+        strength: Annotated[float, Field(ge=0, le=1, description="Opacity of the tint.")] = 0.85,
+        eyes: Annotated[Literal["both", "left", "right"], Field(description="Genesis 9 can color each eye "
+                                                                           "(heterochromia).")] = "both",
+        remove: Annotated[bool, Field(description="Take the tint off.")] = False,
+    ) -> dict:
+        """Changes iris color only (not the whites): a color tint, and on Genesis 9 one of its 16
+        iris images. For a whole new eye look, eye material presets also work (content_search)."""
+        return await call("eye_color", _clean(figure=figure, color=color, iris=iris, keep_iris=keep_iris or None,
+                                              strength=strength, eyes=eyes, remove=remove or None))
 
     # ------------------------------------------------ figures on props ----
     @mcp.tool(annotations=READ_ONLY)

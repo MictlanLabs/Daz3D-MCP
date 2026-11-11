@@ -81,7 +81,7 @@ function dazmcpTool(args) {
 		}
 	}
 	if (tracks.morphs) {
-		morphs = DazMcp.morphList(node, { raw: true, include_hidden: true }).raw;
+		morphs = DazMcp.morphList(node, { raw: true, include_hidden: true, controls: true }).raw;
 		byName = {};
 		for (j = 0; j < morphs.length; j++) {
 			byName[DazMcp.lower(morphs[j].prop.getLabel())] = morphs[j].prop;

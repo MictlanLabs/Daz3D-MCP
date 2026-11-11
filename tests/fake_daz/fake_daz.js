@@ -289,7 +289,8 @@ Prop.prototype.setBoolValue = function (b) { this.d.value = !!b; this.onChange()
 Prop.prototype.isMappable = function () { return !!this.d.mappable; };
 Prop.prototype.getMapValue = function () {
 	var m = this.d.map;
-	return m ? { getFilename: function () { return m; } } : null;
+	if (m && m.indexOf(LAYERED) === 0) { return layeredTexture(m.slice(LAYERED.length)); }
+	return m ? { getFilename: function () { return m; }, getName: function () { return path.basename(m); } } : null;
 };
 Prop.prototype.setMap = function (tex) {
 	if (tex !== null && (!tex || !tex.getFilename)) { throw new Error("setMap needs a DzTexture"); }
@@ -1118,10 +1119,86 @@ global.App = {
 	},
 	getImportMgr: function () { return importMgr; },
 	getImageMgr: function () {
-		return { getImage: function (p) { return { getFilename: function () { return p; } }; } };
+		return {
+			getImage: function (p) { return { getFilename: function () { return p; } }; },
+			createLayeredTexture: function (name) {
+				state.layered = state.layered || {};
+				state.layered[name] = { size: [-1, -1], layers: [] };
+				changed();
+				return layeredTexture(name);
+			}
+		};
 	},
 	getRenderMgr: function () { return renderMgr; }
 };
+
+// ---------------------------------------------------- layered images ----
+// A DzLayeredTexture (Daz's Layered Image Editor): a stack of layers, each an
+// image or a color fill, with a blend mode, an opacity and an optional mask.
+// Kept in state.layered[name]; a property's map holds "layered://name".
+var LAYERED = "layered://";
+var BLEND = { BlendModeSourceOver: 0, BlendModeMultiply: 13, BlendModeScreen: 14, BlendModeOverlay: 15 };
+
+function textureLayer(l, isMask) {
+	var o = {};
+	["label", "imageFile", "opacity", "blendMode", "enabled"].forEach(function (k) {
+		Object.defineProperty(o, k, {
+			get: function () { return l[k]; },
+			set: function (v) { l[k] = v; changed(); }
+		});
+	});
+	Object.defineProperty(o, "color", {
+		get: function () { var c = l.color || [255, 255, 255]; return new global.Color(c[0], c[1], c[2]); },
+		set: function (c) {
+			if (!(c instanceof global.Color)) { throw new Error("layer color needs a Color"); }
+			l.color = [c.red, c.green, c.blue];
+			changed();
+		}
+	});
+	Object.keys(BLEND).forEach(function (k) { o[k] = BLEND[k]; });
+	if (!isMask) {
+		o.createMask = function (label) {
+			if (label === undefined) { throw new Error("Insufficient arguments"); }
+			l.mask = { label: label, imageFile: "" };
+			changed();
+			return textureLayer(l.mask, true);
+		};
+		o.getMask = function () { return l.mask ? textureLayer(l.mask, true) : null; };
+	}
+	return o;
+}
+
+function layeredTexture(name) {
+	var t = state.layered[name];
+	var o = {
+		getName: function () { return name; },
+		getFilename: function () { return LAYERED + name; },
+		className: function () { return "DzLayeredTexture"; },
+		inherits: function (c) { return c === "DzLayeredTexture" || c === "DzTexture"; },
+		getNumLayers: function () { return t.layers.length; },
+		getLayer: function (i) { return t.layers[i] ? textureLayer(t.layers[i]) : null; },
+		createLayer: function (label) {
+			var l = { label: label, imageFile: "", opacity: 1, blendMode: 0, color: [255, 255, 255], enabled: true };
+			t.layers.push(l);
+			changed();
+			return textureLayer(l);
+		},
+		removeLayer: function (i) { t.layers.splice(i, 1); changed(); },
+		copyFrom: function (other) {
+			var src = state.layered[other.getName()];
+			t.size = src.size.slice();
+			t.layers = JSON.parse(JSON.stringify(src.layers));
+			changed();
+		},
+		beginEditing: function () { t.editing = true; },
+		endEditing: function () { delete t.editing; changed(); }
+	};
+	Object.defineProperty(o, "size", {
+		get: function () { return new global.Size(t.size[0], t.size[1]); },
+		set: function (s) { t.size = [s.width, s.height]; changed(); }
+	});
+	return o;
+}
 
 // 1x1 transparent PNG.
 var PNG = Buffer.from(

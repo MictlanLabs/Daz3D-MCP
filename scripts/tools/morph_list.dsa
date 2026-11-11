@@ -11,6 +11,7 @@
 function dazmcpTool(args) {
 	var node = DazMcp.requireNode(args.node, "node");
 	if (DazMcp.nodeType(node) === "bone") { node = DazMcp.ownerFigure(node); }
+	if (args.controls === undefined) { args.controls = true; }
 	var res = DazMcp.morphList(node, args);
 	res.node = node.getLabel();
 	return res;

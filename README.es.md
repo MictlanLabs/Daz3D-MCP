@@ -85,7 +85,10 @@ script. Es más lento pero no necesita compilar nada.
 | `node_set` | Mueve, rota, escala, muestra/oculta, renombra o selecciona un nodo |
 | `node_delete` | Borra nodos (y lo que lleva puesto una figura) |
 | `figure_info` | Generación, altura, ropa, morphs en uso, huesos posados y superficies de una figura |
-| `morph_list` / `morph_set` | Busca y ajusta diales de forma |
+| `morph_list` / `morph_set` | Busca y ajusta diales de forma y los controles de pose y cara de la figura |
+| `face_expression` | Expresiones con nombre (sonrisa, tristeza, enojo, sorpresa, guiño...) en Genesis 9 y 8.1, o diales de la cara por nombre |
+| `eyes_look_at` | Hace que los ojos (y parte de la cabeza) miren a una cámara, a otra figura o a un punto |
+| `eye_color` | Cambia solo el color del iris, lo blanco del ojo no se toca; los 16 iris de Genesis 9; un color por ojo |
 | `pose_bones` / `pose_reset` | Rota huesos (avisa de los que topan con su límite) / vuelve a la pose por defecto |
 | `prop_surfaces` | Mide dónde se puede sentar, acostar o parar una figura sobre un mueble: altura, tamaño, hacia dónde mira un asiento |
 | `place_on` | Pone una figura ya posada sobre un asiento, cama o escalón: mirando al frente, contra el respaldo, la cadera sobre el cojín |
@@ -116,7 +119,7 @@ script. Es más lento pero no necesita compilar nada.
 | `run_script` | Ejecuta DazScript para todo lo demás (se puede desactivar) |
 | `daz_guide` | Devuelve las skills como texto para agentes sin soporte de skills |
 
-Skills: `daz-basics`, `scene-building`, `characters`, `furniture-poses`, `rendering`, `third-party-assets`, `animation`.
+Skills: `daz-basics`, `scene-building`, `characters`, `faces`, `furniture-poses`, `rendering`, `third-party-assets`, `animation`.
 
 Pruébalo: *"Abre ~/Documents/escena.duf en Daz, describe la escena y muéstrame una captura."*
 O: *"Monta una escena con dos personajes Genesis 9, vestidos y posados,

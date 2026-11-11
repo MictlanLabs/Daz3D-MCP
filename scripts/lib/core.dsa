@@ -622,38 +622,65 @@ DazMcp.cameraApply = function (cam, args) {
 
 // --------------------------------------------------------------- morphs ----
 // Shape dials are the value properties of DzMorph modifiers on the object.
-//   opts.query, opts.only_nonzero, opts.include_hidden, opts.limit, opts.raw
+// Many pose and face dials (Eye Blink, Brow Up, Jaw Open on Genesis 8.1, the
+// "Expressions 8.1" dials...) are not morphs but properties of the figure node
+// that drive morphs and bones; opts.controls adds those too.
+//   opts.query, opts.only_nonzero, opts.include_hidden, opts.limit, opts.raw, opts.controls
+DazMcp.CONTROL_PATH = /^\/(Pose Controls|Actor|Hidden|Morphs|Shapes)(\/|$)/;
+
 DazMcp.morphList = function (node, opts) {
 	var obj = null;
 	var out = [];
 	var raw = [];
 	var total = 0;
+	var seen = {};
 	var words = opts.query ? DazMcp.lower(opts.query).split(/\s+/) : [];
 	var limit = opts.limit || 100;
-	var i, j, n, mod, prop, text, ok, val, group;
-	try { obj = node.getObject(); } catch (e) { obj = null; }
-	if (!obj) { return { morphs: [], total: 0, truncated: false, raw: [] }; }
-	n = obj.getNumModifiers();
-	for (i = 0; i < n; i++) {
-		mod = obj.getModifier(i);
-		if (!DazMcp.inherits(mod, "DzMorph")) { continue; }
-		prop = mod.getValueControl();
-		if (!prop) { continue; }
-		try { if (!opts.include_hidden && prop.isHidden()) { continue; } } catch (e2) { /* ignore */ }
-		val = prop.getValue();
-		if (opts.only_nonzero && Math.abs(val) < 1e-6) { continue; }
+	var i, j, n, mod, prop, text, ok, val, group, name;
+	var consider = function (p, nm, kind) {
+		if (!p || seen[nm]) { return; }
+		try { if (!opts.include_hidden && p.isHidden()) { return; } } catch (e2) { /* ignore */ }
+		val = p.getValue();
+		if (typeof val !== "number") { return; }
+		if (opts.only_nonzero) {
+			// "in use" = away from its default (a few dials rest at 0.25 or 1)
+			var dv = 0;
+			try { dv = Number(p.getDefaultValue()) || 0; } catch (e6) { dv = 0; }
+			if (Math.abs(val - dv) < 1e-6) { return; }
+		}
 		group = "";
-		try { group = String(prop.getPath()); } catch (e3) { group = ""; }
-		text = DazMcp.lower(prop.getLabel() + " " + mod.getName() + " " + group);
+		try { group = String(p.getPath()); } catch (e3) { group = ""; }
+		if (kind === "control" && !DazMcp.CONTROL_PATH.test(group)) { return; }
+		seen[nm] = true;
+		text = DazMcp.lower(p.getLabel() + " " + nm + " " + group);
 		ok = true;
 		for (j = 0; j < words.length; j++) { if (words[j] && text.indexOf(words[j]) < 0) { ok = false; break; } }
-		if (!ok) { continue; }
+		if (!ok) { return; }
 		total++;
-		if (opts.raw) { raw.push({ prop: prop, name: String(mod.getName()) }); continue; }
-		if (out.length >= limit) { continue; }
-		var entry = { label: prop.getLabel(), name: String(mod.getName()), group: group, value: DazMcp.round(val, 4) };
-		try { entry.min = DazMcp.round(prop.getMin(), 3); entry.max = DazMcp.round(prop.getMax(), 3); } catch (e4) { /* ignore */ }
+		if (opts.raw) { raw.push({ prop: p, name: nm, kind: kind }); return; }
+		if (out.length >= limit) { return; }
+		var entry = { label: p.getLabel(), name: nm, group: group, value: DazMcp.round(val, 4) };
+		try { entry.min = DazMcp.round(p.getMin(), 3); entry.max = DazMcp.round(p.getMax(), 3); } catch (e4) { /* ignore */ }
+		if (kind === "control") { entry.control = true; }
 		out.push(entry);
+	};
+	try { obj = node.getObject(); } catch (e) { obj = null; }
+	if (obj) {
+		n = obj.getNumModifiers();
+		for (i = 0; i < n; i++) {
+			mod = obj.getModifier(i);
+			if (!DazMcp.inherits(mod, "DzMorph")) { continue; }
+			consider(mod.getValueControl(), String(mod.getName()), "morph");
+		}
+	}
+	if (opts.controls) {
+		try { n = node.getNumProperties(); } catch (e5) { n = 0; }
+		for (i = 0; i < n; i++) {
+			prop = node.getProperty(i);
+			if (!DazMcp.inherits(prop, "DzFloatProperty")) { continue; }
+			name = String(prop.getName());
+			consider(prop, name, "control");
+		}
 	}
 	return { morphs: out, total: total, truncated: total > out.length && !opts.raw, raw: raw };
 };
@@ -1041,7 +1068,7 @@ DazMcp.channels = function (node, opts) {
 		}
 	}
 	if (opts.morphs !== false) {
-		morphs = DazMcp.morphList(node, { raw: true, include_hidden: true }).raw;
+		morphs = DazMcp.morphList(node, { raw: true, include_hidden: true, controls: true }).raw;
 		for (i = 0; i < morphs.length; i++) { add("morphs", morphs[i].prop.getLabel(), "value", 0, morphs[i].prop); }
 	}
 	return out;

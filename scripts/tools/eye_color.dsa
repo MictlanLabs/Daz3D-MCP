@@ -1,0 +1,142 @@
+// Tool: eye_color
+// Changes the iris color of a figure without touching the whites of the eyes.
+//
+// Genesis 9: each eye's Base Color is a layered image (Base, Sclera, Iris).
+// The tool gives each eye its own copy, can swap the Iris layer for one of the
+// 16 irises that ship with Genesis 9, and adds an "Iris Tint" color layer
+// (Overlay) masked by the iris, so only the iris changes color.
+// Genesis 8 / 8.1: the irises are their own surface ("Irises"); the tool puts
+// the same tint layer over that surface's image.
+//
+// args:
+//   figure    (string, required) label
+//   color     ([r, g, b] 0..1 or "#rrggbb") iris color; omit to only swap the iris
+//   iris      (int 1..16) Genesis 9 iris image; with color and no iris, 3 (light grey) is used
+//   keep_iris (bool, default false) tint the current iris instead of a light grey one
+//   strength  (number 0..1, default 0.85) opacity of the tint
+//   eyes      ("both" | "left" | "right", default "both")
+//   remove    (bool, default false) take the tint off (and keep the iris)
+
+var SPLIT = "Runtime/Textures/DAZ/Characters/Genesis9/Base/Eyes/Split/";
+var TINT = "Iris Tint";
+
+function pad2(n) { return n < 10 ? "0" + n : String(n); }
+
+function splitFile(name) {
+	var dirs = DazMcp.contentDirs();
+	for (var i = 0; i < dirs.length; i++) {
+		if (dirs[i].kind !== "daz") { continue; }
+		var f = String(dirs[i].path).replace(/\\/g, "/").replace(/\/$/, "") + "/" + SPLIT + name;
+		if (DazMcp.fileExists(f)) { return f; }
+	}
+	return null;
+}
+
+function layerIndex(tex, label) {
+	for (var i = 0; i < tex.getNumLayers(); i++) {
+		if (String(tex.getLayer(i).label) === label) { return i; }
+	}
+	return -1;
+}
+
+// The node and surfaces that hold the irises: G9 "Eye Left/Right" on the
+// Genesis 9 Eyes figure, G8 "Irises" on the figure itself.
+function irisSurfaces(fig, which) {
+	var nodes = [fig].concat(DazMcp.followers(fig));
+	var i, labels, want;
+	for (i = 0; i < nodes.length; i++) {
+		labels = DazMcp.surfaceLabels(nodes[i]);
+		if (labels.indexOf("Eye Left") >= 0 && labels.indexOf("Eye Right") >= 0) {
+			want = which === "both" ? ["Eye Left", "Eye Right"] : [which === "left" ? "Eye Left" : "Eye Right"];
+			return { node: nodes[i], surfaces: want, kind: "g9" };
+		}
+	}
+	for (i = 0; i < nodes.length; i++) {
+		labels = DazMcp.surfaceLabels(nodes[i]);
+		if (labels.indexOf("Irises") >= 0) {
+			if (which !== "both") {
+				throw DazMcp.fail("bad_args", "Genesis 8 has one Irises surface for both eyes: use eyes=\"both\".");
+			}
+			return { node: nodes[i], surfaces: ["Irises"], kind: "g8" };
+		}
+	}
+	throw DazMcp.fail("not_found", fig.getLabel() + " has no Genesis 9 eyes (Eye Left / Eye Right) nor an Irises surface.");
+}
+
+function dazmcpTool(args) {
+	var fig = DazMcp.requireFigure(args.figure);
+	var which = args.eyes || "both";
+	var strength = typeof args.strength === "number" ? Math.max(0, Math.min(1, args.strength)) : 0.85;
+	var color = args.color !== undefined && args.color !== null ? DazMcp.toColor(args.color) : null;
+	var iris = typeof args.iris === "number" ? Math.round(args.iris) : null;
+	if (!color && iris === null && args.remove !== true) {
+		throw DazMcp.fail("bad_args", "Give a color, an iris number (1-16), or remove=true.");
+	}
+	var where = irisSurfaces(fig, which);
+	if (where.kind === "g8" && iris !== null) {
+		throw DazMcp.fail("bad_args", "Iris images 1-16 are for Genesis 9. On Genesis 8 use color, or an eye material preset.");
+	}
+	if (where.kind === "g9" && color && iris === null && args.keep_iris !== true) { iris = 3; }
+	var irisFile = null;
+	if (iris !== null) {
+		if (iris < 1 || iris > 16) { throw DazMcp.fail("bad_args", "iris is a number from 1 to 16."); }
+		irisFile = splitFile("Genesis9_Eyes_Iris_" + pad2(iris) + ".png");
+		if (!irisFile) { throw DazMcp.fail("not_found", "Genesis 9 iris images are not installed (" + SPLIT + ")."); }
+	}
+
+	var im = App.getImageMgr();
+	var mats = DazMcp.materialsOf(where.node, where.surfaces);
+	var out = { figure: fig.getLabel(), node: where.node.getLabel(), changed: [] };
+	var i, m, prop, old, oldName, name, tex, idx, li, layer, mask, file, info;
+	for (i = 0; i < mats.length; i++) {
+		m = mats[i];
+		prop = DazMcp.findProp(m, ["Base Color", "Diffuse Color"]);
+		if (!prop) { continue; }
+		old = prop.getMapValue();
+		oldName = old ? String(old.getName ? old.getName() : "") : "";
+		name = fig.getLabel() + " " + m.getLabel() + " Iris (DazMcp)";
+		if (old && oldName === name && DazMcp.inherits(old, "DzLayeredTexture")) {
+			tex = old;                                   // ours from an earlier call: edit it
+		} else {
+			tex = im.createLayeredTexture(name);
+			if (old && DazMcp.inherits(old, "DzLayeredTexture")) {
+				tex.copyFrom(old);
+			} else if (old) {
+				file = String(old.getFilename());
+				var img = new Image(file);
+				tex.size = new Size(img.width, img.height);
+				layer = tex.createLayer("Base");
+				layer.imageFile = file;
+			} else {
+				throw DazMcp.fail("not_found", m.getLabel() + " has no image to recolor; load an eye material preset first.");
+			}
+		}
+		tex.beginEditing();
+		idx = layerIndex(tex, TINT);
+		while (idx >= 0) { tex.removeLayer(idx); idx = layerIndex(tex, TINT); }
+		info = { surface: m.getLabel() };
+		li = layerIndex(tex, "Iris");
+		if (where.kind === "g9" && li < 0) {
+			tex.endEditing();
+			throw DazMcp.fail("not_found", m.getLabel() + " has no Iris layer; load a Genesis 9 eye material preset first.");
+		}
+		if (irisFile) { tex.getLayer(li).imageFile = irisFile; }
+		if (li >= 0) { info.iris = String(tex.getLayer(li).imageFile).split("/").pop(); }
+		if (color && args.remove !== true) {
+			layer = tex.createLayer(TINT);
+			layer.color = color;
+			layer.blendMode = layer.BlendModeOverlay;
+			layer.opacity = strength;
+			if (li >= 0) {
+				mask = layer.createMask("Iris Mask");
+				mask.imageFile = tex.getLayer(li).imageFile;
+			}
+			info.tint = DazMcp.colorToArray(color);
+			info.strength = strength;
+		}
+		tex.endEditing();
+		prop.setMap(tex);
+		out.changed.push(info);
+	}
+	return out;
+}

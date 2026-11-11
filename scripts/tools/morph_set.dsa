@@ -10,7 +10,7 @@ function dazmcpTool(args) {
 	var node = DazMcp.requireNode(args.node, "node");
 	if (DazMcp.nodeType(node) === "bone") { node = DazMcp.ownerFigure(node); }
 	var values = args.values || {};
-	var all = DazMcp.morphList(node, { include_hidden: true, limit: 100000, raw: true }).raw;
+	var all = DazMcp.morphList(node, { include_hidden: true, limit: 100000, raw: true, controls: true }).raw;
 	var set = [];
 	var notFound = [];
 	var key, i, want, prop, hit, near;

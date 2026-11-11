@@ -51,7 +51,7 @@ function dazmcpTool(args) {
 	}
 	var missing = [];
 	if (args.morphs && args.morphs.length) {
-		var list = DazMcp.morphList(fig, { raw: true, include_hidden: true }).raw;
+		var list = DazMcp.morphList(fig, { raw: true, include_hidden: true, controls: true }).raw;
 		var want, found;
 		for (i = 0; i < args.morphs.length; i++) {
 			want = DazMcp.lower(args.morphs[i]);

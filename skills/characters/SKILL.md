@@ -102,3 +102,5 @@ viewport_capture()
 - Material presets (`kind: material`) restyle clothing or skin: load them with
   `content_load(path, target=item)`.
 - Change skin only when the user asks; character presets already set it.
+- Expressions, where the eyes look, and eye, skin, hair and makeup color: follow
+  the `faces` skill (`face_expression`, `eyes_look_at`, `eye_color`).

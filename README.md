@@ -83,7 +83,10 @@ It is slower but needs nothing compiled.
 | `node_set` | Moves, rotates, scales, shows/hides, renames or selects a node |
 | `node_delete` | Deletes nodes (and what is fitted to a figure) |
 | `figure_info` | A figure's generation, height, clothing, morphs in use, posed bones and surfaces |
-| `morph_list` / `morph_set` | Finds and sets shape dials |
+| `morph_list` / `morph_set` | Finds and sets shape dials and the figure's pose and face controls |
+| `face_expression` | Named expressions (smile, sad, angry, surprised, wink...) on Genesis 9 and 8.1, or face dials by name |
+| `eyes_look_at` | Aims the eyes (and part of the head turn) at a camera, another figure or a point |
+| `eye_color` | Iris color only, the whites stay white; Genesis 9's 16 iris images; one color per eye |
 | `pose_bones` / `pose_reset` | Rotates bones (reports dials held at joint limits) / back to the default pose |
 | `prop_surfaces` | Measures where a figure can sit, lie or stand on a prop: height, size, which way a seat faces |
 | `place_on` | Puts a posed figure on a seat, bed or step: faces it out, against the backrest, hips on the cushion |
@@ -114,7 +117,7 @@ It is slower but needs nothing compiled.
 | `run_script` | Runs DazScript for anything else (can be disabled) |
 | `daz_guide` | Returns the skills as text for agents without skills support |
 
-Skills: `daz-basics`, `scene-building`, `characters`, `furniture-poses`, `rendering`, `third-party-assets`, `animation`.
+Skills: `daz-basics`, `scene-building`, `characters`, `faces`, `furniture-poses`, `rendering`, `third-party-assets`, `animation`.
 
 Try it: *"Open ~/Documents/scene.duf in Daz, describe the scene and show me a capture."*
 Or: *"Build a scene with two Genesis 9 characters, dressed and posed, talking

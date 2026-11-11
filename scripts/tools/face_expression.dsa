@@ -1,0 +1,160 @@
+// Tool: face_expression
+// Puts a named expression on a figure's face (smile, sad, angry...), built
+// from the FACS dials Genesis 9 and Genesis 8.1 share, or sets face dials by
+// name. Clears the face first, so expressions do not pile up.
+//
+// args:
+//   figure     (string, required) label
+//   expression (string) one of EXPRESSIONS below; "neutral" only clears
+//   strength   (number, default 1) multiplies the expression's values
+//   values     (object) {dial label or name: value} set after the expression
+//   reset      (bool, default true) clear face dials and face bones first
+
+// Face dials by role. Each role lists the dial names to try, Genesis 9 first:
+// Genesis 8.1 keeps some of them as "_div2" morphs or "facs_jnt_" controls.
+var ROLES = {
+	smile: ["facs_ctrl_MouthSmile"],
+	smile_left: ["facs_bs_MouthSmileLeft", "facs_bs_MouthSmileLeft_div2"],
+	smile_right: ["facs_bs_MouthSmileRight", "facs_bs_MouthSmileRight_div2"],
+	cheek_squint: ["facs_ctrl_CheekSquint"],
+	cheek_squint_left: ["facs_bs_CheekSquintLeft", "facs_bs_CheekSquintLeft_div2"],
+	eye_squint: ["facs_ctrl_EyeSquint"],
+	eye_wide: ["facs_ctrl_EyeWide"],
+	blink: ["facs_ctrl_EyeBlink"],
+	blink_left: ["facs_bs_EyeBlinkLeft", "facs_jnt_EyeBlinkLeft"],
+	brow_up: ["facs_ctrl_BrowUp"],
+	brow_inner_up: ["facs_ctrl_BrowInnerUp"],
+	brow_down: ["facs_ctrl_BrowDown"],
+	brow_squeeze: ["facs_ctrl_BrowSqueeze"],
+	jaw_open: ["facs_bs_JawOpen", "facs_jnt_JawOpen"],
+	jaw_clench: ["facs_ctrl_JawClench"],
+	frown: ["facs_ctrl_MouthFrown"],
+	nose_sneer: ["facs_ctrl_NoseSneer"],
+	upper_lip_up: ["facs_ctrl_MouthUpperUp"],
+	stretch: ["facs_ctrl_MouthStretch"],
+	press: ["facs_ctrl_MouthPress"],
+	shrug_lower: ["facs_ctrl_MouthShrugLower", "facs_bs_MouthShrugLower_div2"],
+	pucker: ["facs_ctrl_MouthPucker", "facs_bs_MouthPucker_div2"],
+	funnel: ["facs_ctrl_MouthFunnel", "facs_bs_MouthFunnel_div2"]
+};
+
+// Left and right are the figure's own.
+var EXPRESSIONS = {
+	neutral: {},
+	smile: { smile: 0.8, cheek_squint: 0.35, eye_squint: 0.15 },
+	big_smile: { smile: 1, cheek_squint: 0.6, eye_squint: 0.25, jaw_open: 0.25, upper_lip_up: 0.2 },
+	smirk: { smile_left: 0.7, cheek_squint_left: 0.3 },
+	sad: { brow_inner_up: 0.9, frown: 0.7, shrug_lower: 0.3, eye_squint: 0.1 },
+	angry: { brow_down: 1, brow_squeeze: 0.6, eye_squint: 0.4, nose_sneer: 0.35, press: 0.5, frown: 0.3 },
+	surprised: { brow_up: 1, eye_wide: 0.8, jaw_open: 0.35, funnel: 0.15 },
+	afraid: { brow_inner_up: 1, brow_up: 0.5, eye_wide: 1, stretch: 0.7, jaw_open: 0.2 },
+	disgusted: { nose_sneer: 0.9, upper_lip_up: 0.6, brow_down: 0.5, eye_squint: 0.3, frown: 0.3 },
+	pain: { brow_squeeze: 0.8, brow_down: 0.5, eye_squint: 0.8, upper_lip_up: 0.4, stretch: 0.4, jaw_clench: 0.3 },
+	wink: { blink_left: 1, smile_left: 0.5, cheek_squint_left: 0.4 },
+	eyes_closed: { blink: 1 },
+	mouth_open: { jaw_open: 0.55 },
+	kiss: { pucker: 0.9 }
+};
+
+// Dials that belong to the face: everything under Pose Controls/Head, and the
+// FACS neck dials (not the Neck-Head bend/twist pose dials).
+function isFaceDial(entry) {
+	var g = "";
+	try { g = String(entry.prop.getPath()); } catch (e) { g = ""; }
+	if (entry.name === "facs_ctrl_EyeLookAuto") { return false; }
+	if (g.indexOf("/Pose Controls/Head") === 0) { return true; }
+	return g.indexOf("/Pose Controls/Neck") === 0 && entry.name.indexOf("facs_") === 0;
+}
+
+function faceBones(fig) {
+	var out = [];
+	var bones = DazMcp.bones(fig);
+	var i, b, p, inHead, name;
+	for (i = 0; i < bones.length; i++) {
+		b = bones[i];
+		name = DazMcp.lower(b.getName());
+		if (name === "head" || name === "l_eye" || name === "r_eye" || name === "leye" || name === "reye") { continue; }
+		inHead = false;
+		p = b.getNodeParent();
+		while (p && DazMcp.inherits(p, "DzBone")) {
+			if (DazMcp.lower(p.getName()) === "head") { inHead = true; break; }
+			p = p.getNodeParent();
+		}
+		if (inHead) { out.push(b); }
+	}
+	return out;
+}
+
+function dazmcpTool(args) {
+	var fig = DazMcp.requireFigure(args.figure);
+	var expr = args.expression ? DazMcp.lower(args.expression).replace(/[\s-]+/g, "_") : null;
+	var strength = typeof args.strength === "number" ? args.strength : 1;
+	var all = DazMcp.morphList(fig, { include_hidden: true, raw: true, limit: 100000, controls: true }).raw;
+	var byName = {};
+	var byLabel = {};
+	var i, j, k, e, p, v, recipe, role, names, hit, b, c, ctl, axes;
+
+	if (expr !== null && !EXPRESSIONS.hasOwnProperty(expr)) {
+		throw DazMcp.fail("bad_args", "Unknown expression " + args.expression + ".", { expressions: Object.keys(EXPRESSIONS) });
+	}
+	for (i = 0; i < all.length; i++) {
+		byName[DazMcp.lower(all[i].name)] = all[i];
+		if (!byLabel[DazMcp.lower(all[i].prop.getLabel())]) { byLabel[DazMcp.lower(all[i].prop.getLabel())] = all[i]; }
+	}
+
+	var out = { figure: fig.getLabel(), generation: DazMcp.generation(fig), expression: expr, set: [], missing: [] };
+
+	if (args.reset !== false) {
+		var cleared = 0;
+		for (i = 0; i < all.length; i++) {
+			e = all[i];
+			if (!isFaceDial(e)) { continue; }
+			p = e.prop;
+			v = 0;
+			try { v = Number(p.getDefaultValue()) || 0; } catch (e1) { v = 0; }
+			if (Math.abs(p.getValue() - v) > 1e-6) { p.setValue(v); cleared++; }
+		}
+		var fb = faceBones(fig);
+		for (i = 0; i < fb.length; i++) {
+			axes = [fb[i].getXRotControl(), fb[i].getYRotControl(), fb[i].getZRotControl()];
+			for (c = 0; c < 3; c++) {
+				ctl = axes[c];
+				if (Math.abs(ctl.getValue()) > 1e-6) { ctl.setValue(0); cleared++; }
+			}
+		}
+		out.cleared = cleared;
+	}
+
+	if (expr) {
+		recipe = EXPRESSIONS[expr];
+		for (role in recipe) {
+			if (!recipe.hasOwnProperty(role)) { continue; }
+			names = ROLES[role];
+			hit = null;
+			for (j = 0; j < names.length; j++) {
+				if (byName[DazMcp.lower(names[j])]) { hit = byName[DazMcp.lower(names[j])]; break; }
+			}
+			if (!hit) { out.missing.push(role); continue; }
+			hit.prop.setValue(recipe[role] * strength);
+			out.set.push({ dial: hit.prop.getLabel(), name: hit.name, value: DazMcp.round(hit.prop.getValue(), 3) });
+		}
+	}
+
+	if (args.values) {
+		out.not_found = [];
+		for (k in args.values) {
+			if (!args.values.hasOwnProperty(k)) { continue; }
+			if (typeof args.values[k] !== "number") {
+				throw DazMcp.fail("bad_args", "The value for " + k + " must be a number.");
+			}
+			hit = byName[DazMcp.lower(k)] || byLabel[DazMcp.lower(k)];
+			if (!hit) { out.not_found.push(k); continue; }
+			hit.prop.setValue(args.values[k]);
+			out.set.push({ dial: hit.prop.getLabel(), name: hit.name, value: DazMcp.round(hit.prop.getValue(), 3) });
+		}
+		if (!out.not_found.length) { delete out.not_found; }
+		else { out.hint = "morph_list(node, query='Pose Controls/Head') lists the face dials."; }
+	}
+	if (!out.missing.length) { delete out.missing; }
+	return out;
+}

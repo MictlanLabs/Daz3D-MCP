@@ -1,0 +1,134 @@
+// Tool: eyes_look_at
+// Aims a figure's eyes (and, if asked, part of the head turn) at a camera,
+// another figure's eyes, a node or a point. Works on the measured world
+// rotation of each bone, so it does not depend on bone axes or rotation order.
+//
+// args:
+//   figure (string, required) label
+//   target (string or [x, y, z], required) camera, figure (its eyes), node, or a world point
+//   head   (number 0..1, default 0) share of the turn the head takes before the eyes aim
+//   eyes   ("both" | "left" | "right", default "both")
+
+var EYE_BONES = { left: ["l_eye", "lEye"], right: ["r_eye", "rEye"] };
+var LOOK_DIALS = /^facs_ctrl_EyeLook(Side-Side|Up-Down)/;
+
+function v3(p) { return [p.x, p.y, p.z]; }
+function dot3(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+
+function boneOf(fig, names) {
+	for (var i = 0; i < names.length; i++) {
+		var b = DazMcp.findBone(fig, names[i]);
+		if (b) { return b; }
+	}
+	return null;
+}
+
+// Where the target is: between a figure's eyes, a camera's lens, a point...
+function targetPoint(ref) {
+	if (DazMcp.isArray(ref)) { return DazMcp.checkVec(ref, "target"); }
+	var node = DazMcp.requireNode(ref, "target");
+	if (DazMcp.inherits(node, "DzSkeleton")) {
+		var l = boneOf(node, EYE_BONES.left);
+		var r = boneOf(node, EYE_BONES.right);
+		if (l && r) {
+			var a = v3(l.getWSPos()), b = v3(r.getWSPos());
+			return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
+		}
+		var h = boneOf(node, ["head"]);
+		if (h) {
+			var hp = v3(h.getWSPos());
+			return [hp[0], hp[1] + 8, hp[2]];
+		}
+	}
+	return DazMcp.resolvePoint(ref, "target");
+}
+
+// How far (degrees) the bone's forward axis (local +Z) is from the target:
+// [up-down, side-side] in the bone's own frame.
+function aimError(bone, t) {
+	var p = v3(bone.getWSPos());
+	var d = [t[0] - p[0], t[1] - p[1], t[2] - p[2]];
+	var R = bone.getWSRot();
+	var fx = v3(R.multVec(new DzVec3(1, 0, 0)));
+	var fy = v3(R.multVec(new DzVec3(0, 1, 0)));
+	var fz = v3(R.multVec(new DzVec3(0, 0, 1)));
+	var lx = dot3(d, fx), ly = dot3(d, fy), lz = dot3(d, fz);
+	var deg = 180 / Math.PI;
+	return [Math.atan2(ly, Math.sqrt(lx * lx + lz * lz)) * deg, Math.atan2(lx, lz) * deg];
+}
+
+// Newton steps on the bone's X and Y dials until its forward axis points at
+// the target (or the joint limits stop it). share < 1 turns only part way.
+function aim(bone, t, share) {
+	var cx = bone.getXRotControl(), cy = bone.getYRotControl();
+	var x0 = cx.getValue(), y0 = cy.getValue();
+	var it, e, ex, ey, J, det, dx, dy;
+	for (it = 0; it < 6; it++) {
+		e = aimError(bone, t);
+		if (Math.abs(e[0]) < 0.05 && Math.abs(e[1]) < 0.05) { break; }
+		var x = cx.getValue(), y = cy.getValue();
+		// one degree each way, away from a joint limit (a clamped dial would not move)
+		var sx = 1, sy = 1;
+		cx.setValue(x + 1); if (Math.abs(cx.getValue() - x) < 0.5) { sx = -1; cx.setValue(x - 1); }
+		ex = aimError(bone, t); cx.setValue(x);
+		cy.setValue(y + 1); if (Math.abs(cy.getValue() - y) < 0.5) { sy = -1; cy.setValue(y - 1); }
+		ey = aimError(bone, t); cy.setValue(y);
+		J = [[(ex[0] - e[0]) * sx, (ey[0] - e[0]) * sy], [(ex[1] - e[1]) * sx, (ey[1] - e[1]) * sy]];
+		det = J[0][0] * J[1][1] - J[0][1] * J[1][0];
+		if (Math.abs(det) < 1e-6) { break; }
+		dx = (-e[0] * J[1][1] + e[1] * J[0][1]) / det;
+		dy = (-e[1] * J[0][0] + e[0] * J[1][0]) / det;
+		cx.setValue(x + dx);
+		cy.setValue(y + dy);
+		if (Math.abs(cx.getValue() - (x + dx)) > 0.01 && Math.abs(cy.getValue() - (y + dy)) > 0.01) { break; }
+	}
+	if (share < 1) {
+		cx.setValue(x0 + (cx.getValue() - x0) * share);
+		cy.setValue(y0 + (cy.getValue() - y0) * share);
+	}
+	e = aimError(bone, t);
+	return {
+		bone: String(bone.getName()),
+		rotation: [DazMcp.round(cx.getValue(), 2), DazMcp.round(cy.getValue(), 2), DazMcp.round(bone.getZRotControl().getValue(), 2)],
+		off_by_deg: DazMcp.round(Math.sqrt(e[0] * e[0] + e[1] * e[1]), 2)
+	};
+}
+
+function dazmcpTool(args) {
+	var fig = DazMcp.requireFigure(args.figure);
+	if (args.target === undefined || args.target === null) { throw DazMcp.fail("bad_args", "target is required."); }
+	var t = targetPoint(args.target);
+	var which = args.eyes || "both";
+	var share = typeof args.head === "number" ? Math.max(0, Math.min(1, args.head)) : 0;
+	var out = { figure: fig.getLabel(), target: [DazMcp.round(t[0], 2), DazMcp.round(t[1], 2), DazMcp.round(t[2], 2)] };
+	var i, all, sides, b, r;
+
+	// The Eye Look dials turn the eye bones too; clear them so the bones alone aim.
+	all = DazMcp.morphList(fig, { include_hidden: true, raw: true, limit: 100000, controls: true }).raw;
+	for (i = 0; i < all.length; i++) {
+		if (LOOK_DIALS.test(all[i].name) && Math.abs(all[i].prop.getValue()) > 1e-6) { all[i].prop.setValue(0); }
+	}
+
+	if (share > 0) {
+		var head = boneOf(fig, ["head"]);
+		if (head) { out.head = aim(head, t, share); }
+	}
+
+	sides = which === "both" ? ["left", "right"] : [which];
+	out.eyes = {};
+	out.limited = [];
+	for (i = 0; i < sides.length; i++) {
+		b = boneOf(fig, EYE_BONES[sides[i]]);
+		if (!b) { throw DazMcp.fail("not_found", fig.getLabel() + " has no " + sides[i] + " eye bone."); }
+		r = aim(b, t, 1);
+		out.eyes[sides[i]] = r;
+		if (r.off_by_deg > 1) { out.limited.push(sides[i]); }
+	}
+	if (out.limited.length) {
+		out.hint = "The eyes reached their joint limits (about 30 degrees). Turn the head toward the target " +
+			"(head=0.5, or pose_bones on neck and head) and call eyes_look_at again.";
+	} else {
+		delete out.limited;
+	}
+	return out;
+}

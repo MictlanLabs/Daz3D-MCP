@@ -30,7 +30,7 @@ function dazmcpTool(args) {
 		wearing.push({ label: fitted[i].getLabel(), kind: DazMcp.wearableKind(fitted[i]), visible: fitted[i].isVisible() });
 	}
 
-	morphs = DazMcp.morphList(fig, { only_nonzero: true, limit: 60 });
+	morphs = DazMcp.morphList(fig, { only_nonzero: true, limit: 60, controls: true });
 	mats = [];
 	try {
 		shape = fig.getObject().getCurrentShape();
