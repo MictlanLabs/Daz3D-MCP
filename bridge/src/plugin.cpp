@@ -17,6 +17,7 @@
 #include <dzaction.h>
 #include <dzapp.h>
 #include <dzplugin.h>
+#include <dzversion.h>
 
 namespace {
 
@@ -92,6 +93,6 @@ DZ_PLUGIN_DESCRIPTION((
 	"<a href=\"https://github.com/MictlanLabs/Daz3D-MCP\">Project page</a>."));
 
 // {7e213815-609e-4791-b826-f7cabdefb811}
-DZ_PLUGIN_CLASS_GUID(DazMcpRestartAction, 7e213815, 609e, 4791, b8, 26, f7, ca, bd, ef, b8, 11);
+DZ_PLUGIN_CLASS_GUID(DazMcpRestartAction, 7E213815-609E-4791-B826-F7CABDEFB811);
 
 #include "plugin.moc"

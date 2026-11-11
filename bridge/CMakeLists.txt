@@ -4,7 +4,7 @@
 #   cmake -S bridge -B build -DDAZ_SDK_DIR=/path/to/DAZStudio6SDK -DCMAKE_PREFIX_PATH=/path/to/Qt/6.10.x/macos
 #   cmake --build build --config Release
 #
-# The result is bridge/build/.../dazmcp_bridge.dylib (macOS) or dazmcp_bridge.dll (Windows).
+# The result is bridge/build/.../dazmcp_bridge.dylib (macOS) or dsp_dazmcp_bridge.dll (Windows).
 cmake_minimum_required(VERSION 3.21)
 project(dazmcp_bridge VERSION 0.1.0 LANGUAGES CXX)
 
@@ -17,7 +17,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 6.2 REQUIRED COMPONENTS Core Gui Widgets Network)
+find_package(Qt6 6.2 REQUIRED COMPONENTS Core Gui Widgets Network Qml)
 
 find_path(DAZ_SDK_INCLUDE_DIR dzapp.h
   PATHS "${DAZ_SDK_DIR}/include" "${DAZ_SDK_DIR}"
@@ -25,6 +25,7 @@ find_path(DAZ_SDK_INCLUDE_DIR dzapp.h
 
 find_library(DAZ_CORE_LIBRARY NAMES dzcore
   PATHS
+    "${DAZ_SDK_DIR}/x64/lib"
     "${DAZ_SDK_DIR}/lib/x64"
     "${DAZ_SDK_DIR}/lib/Mac64"
     "${DAZ_SDK_DIR}/lib/macos"
@@ -41,11 +42,14 @@ add_library(dazmcp_bridge MODULE
 target_include_directories(dazmcp_bridge PRIVATE "${DAZ_SDK_INCLUDE_DIR}")
 target_link_libraries(dazmcp_bridge PRIVATE
   "${DAZ_CORE_LIBRARY}"
-  Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network)
+  Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Qml)
 
 if(WIN32)
   target_compile_definitions(dazmcp_bridge PRIVATE UNICODE _UNICODE NOMINMAX)
-  set_target_properties(dazmcp_bridge PROPERTIES PREFIX "" SUFFIX ".dll")
+  # The SDK macros export C++ (mangled) names; Daz looks up plain names.
+  target_sources(dazmcp_bridge PRIVATE src/dazmcp_bridge.def)
+  # Daz Studio on Windows only loads plugin DLLs named dsp_*.dll.
+  set_target_properties(dazmcp_bridge PROPERTIES PREFIX "dsp_" SUFFIX ".dll")
 elseif(APPLE)
   # Daz Studio loads plugins as .dylib files.
   set_target_properties(dazmcp_bridge PROPERTIES PREFIX "" SUFFIX ".dylib")

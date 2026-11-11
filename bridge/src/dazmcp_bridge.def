@@ -1,0 +1,4 @@
+; Daz Studio looks these up by their plain (unmangled) names.
+EXPORTS
+	getSDKVersion
+	getPluginDefinition

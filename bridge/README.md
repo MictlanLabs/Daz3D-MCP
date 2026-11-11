@@ -33,28 +33,36 @@ add `-DCMAKE_OSX_ARCHITECTURES=arm64` or `x86_64` if needed.
 Install it:
 
 ```bash
-uvx daz3d-mcp setup --plugin-file build/bridge/dazmcp_bridge.dylib   # or .dll on Windows
+uvx daz3d-mcp setup --plugin-file build/bridge/dazmcp_bridge.dylib   # Windows: build/bridge/Release/dsp_dazmcp_bridge.dll
 ```
 
 Then restart Daz Studio. The log (Help > Troubleshooting > View Log File)
 should show `Daz3D-MCP bridge 0.1.0 listening on 127.0.0.1:18640`, and
 `uvx daz3d-mcp doctor` should report that Daz Studio answers.
 
-## First build checklist
+## Confirmed on Daz Studio 6.26 (Windows, SDK 6.26.2026.27900 beta)
 
-The plugin was written against the public SDK API and its Qt side is compiled
-and tested in CI against a stub of the SDK (`tests/sdk_stub`). The Daz-specific
-parts still need confirming on the first build with the real Daz Studio 6 SDK:
+First real build: Visual Studio Build Tools 2026, CMake 4.4, Qt 6.10.3
+`msvc2022_64`, generator `-G "Visual Studio 18 2026" -A x64`. What the real
+SDK needed:
 
-1. `DZ_PLUGIN_DEFINITION`, `DZ_PLUGIN_CLASS_GUID` and the other macros in `src/plugin.cpp`.
-2. The `DzAction(text, description)` constructor and `executeAction()`.
-3. `DzScript::setCode`, `call`, `result`, `errorMessage` and `errorLine`.
-4. That Daz Studio ships the `QtNetwork` library the plugin links to.
-5. That the static initializer in `plugin.cpp` starts the server (otherwise use
-   the "Restart Daz3D-MCP Bridge" action, or move the start into a `DzPlugin`
-   subclass's `startup()`).
+1. On Windows Daz only loads plugins named `dsp_*.dll`; the build names it
+   `dsp_dazmcp_bridge.dll`.
+2. The SDK macros export C++ (mangled) names, but Daz looks up
+   `getSDKVersion` and `getPluginDefinition` by plain name, so
+   `src/dazmcp_bridge.def` exports them.
+3. `DZ_PLUGIN_CLASS_GUID(Class, XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX)` takes the
+   GUID as one token, and the version macros need `dzversion.h`.
+4. `DzScript` is reference counted (protected destructor): use `new`, `ref()`
+   and `unref()`.
+5. `DzScript::call()` is declared but not exported by `dzcore`. The bridge uses
+   `execute(args)` and appends `return <entry>(getArguments()[0]);`:
+   `result()` is the value of a top-level `return` (a last bare expression
+   gives `undefined`). `result()` is a `QJSValue`, so the plugin links Qt6::Qml.
+6. The SDK lives in `x64/lib/dzcore.lib` under the SDK folder.
 
-Report the result in an issue so the next person does not have to repeat it.
+The static initializer in `plugin.cpp` starts the server, and the plugin shows
+as loaded in the log. macOS is still unconfirmed.
 
 ## Settings
 

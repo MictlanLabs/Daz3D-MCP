@@ -7,10 +7,12 @@
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QRandomGenerator>
+#include <QtCore/QRegularExpression>
 #include <QtCore/QSaveFile>
 #include <QtCore/QVariantList>
 #include <QtNetwork/QHostAddress>
 #include <QtNetwork/QTcpSocket>
+#include <QtQml/QJSValue>
 
 #include <dzapp.h>
 #include <dzscript.h>
@@ -373,11 +375,24 @@ QByteArray DazMcpBridgeServer::execute(const QByteArray &body, int &status)
 		status = 400;
 		return errorJson(QStringLiteral("bad_request"), QStringLiteral("Field `code` is required."));
 	}
+	static const QRegularExpression identifier(QStringLiteral("^[A-Za-z_$][A-Za-z0-9_$]*$"));
+	if (!identifier.match(entry).hasMatch()) {
+		status = 400;
+		return errorJson(QStringLiteral("bad_request"), QStringLiteral("Field `entry` must be a function name."));
+	}
 
 	m_busy = true;
-	DzScript script;
-	script.setCode(code);
-	const bool ok = script.call(entry, QVariantList() << args);
+	// DzScript is reference counted (its destructor is protected).
+	DzScript *scriptObj = new DzScript();
+	scriptObj->ref();
+	DzScript &script = *scriptObj;
+	// The Daz Studio 6 SDK declares DzScript::call() but dzcore does not export
+	// it, so run the program with execute() and end it with the entry call.
+	// Checked on Daz Studio 6.26: result() is the value of a top-level
+	// `return` (the value of a last bare expression is lost), and
+	// getArguments() holds the execute() arguments.
+	script.setCode(code + QStringLiteral("\n;return %1(getArguments()[0]);\n").arg(entry));
+	const bool ok = script.execute(QVariantList() << args);
 	QByteArray out;
 	if (!ok) {
 		QJsonObject err;
@@ -395,6 +410,7 @@ QByteArray DazMcpBridgeServer::execute(const QByteArray &body, int &status)
 			out = "{\"ok\":true,\"result\":null}";
 		}
 	}
+	scriptObj->unref();
 	m_busy = false;
 	status = 200;
 	return out;

@@ -74,4 +74,6 @@ def find_daz_installs() -> list[DazInstall]:
 
 
 def plugin_filename() -> str:
-    return "dazmcp_bridge.dll" if sys.platform == "win32" else "dazmcp_bridge.dylib"
+    # Daz Studio on Windows only loads plugins whose name starts with "dsp_";
+    # any other DLL in the plugins folder is "skipped".
+    return "dsp_dazmcp_bridge.dll" if sys.platform == "win32" else "dazmcp_bridge.dylib"
