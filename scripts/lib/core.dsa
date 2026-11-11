@@ -1091,11 +1091,15 @@ DazMcp.extendRange = function (lastFrame) {
 
 DazMcp.rotationOrder = function (bone) {
 	var ro, s;
-	var names = ["XYZ", "YZX", "ZYX", "ZXY", "XZY", "YXZ"];
+	// The DzRotationOrder enum, as Daz Studio 6 numbers it (checked on a real
+	// Genesis 9: l_upperarm XYZ = 0, l_forearm XZY = 1, spine1 YZX = 3).
+	var names = ["XYZ", "XZY", "YXZ", "YZX", "ZXY", "ZYX"];
 	try { ro = bone.getRotationOrder(); } catch (e) { return null; }
 	if (ro === undefined || ro === null) { return null; }
 	if (typeof ro === "number") { return names[ro] || null; }
-	try { if (typeof ro.order === "number") { return names[ro.order] || null; } } catch (e2) { /* string next */ }
+	// A DzRotationOrder prints as its order ("YZX"): trust that first.
 	s = String(ro).toUpperCase().replace(/[^XYZ]/g, "");
-	return s.length === 3 ? s : null;
+	if (s.length === 3) { return s; }
+	try { if (typeof ro.order === "number") { return names[ro.order] || null; } } catch (e2) { /* none */ }
+	return null;
 };

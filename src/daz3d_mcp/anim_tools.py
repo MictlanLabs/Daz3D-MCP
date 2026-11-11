@@ -505,25 +505,27 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient]) -> N
         axes) and compares the joint angles Daz shows with the ones each convention predicts. The test
         keys are on mapped bones at the first imported frame, so the import overwrites them."""
         names = list(skel.bones)
-        before = await call("anim_sample", {"figure": figure, "frames": [frame], "dial_bones": names})
-        row = before["frames"].get(str(frame)) or before["frames"][str(float(frame))]
-        dials = {b: tuple(v["rotation"]) for b, v in (row.get("dials") or {}).items()}
-        root = skel.root()
-        root_t = tuple((row.get("dials") or {}).get(root, {}).get("position") or (0.0, 0.0, 0.0))
         tilted = [b for b in bmap.pairs if skel.children(b) and motion.rot_angle(skel.bones[b].orient) > 5]
-        straight = [b for b in bmap.pairs if skel.children(b) and b not in tilted and b != root]
-        probe = (tilted[:3] + straight[:4]) or [b for b in bmap.pairs if b != root][:6]
+        straight = [b for b in bmap.pairs if skel.children(b) and b not in tilted and b != skel.root()]
+        probe = (tilted[:3] + straight[:4]) or [b for b in bmap.pairs if b != skel.root()][:6]
         test = {}
         for i, b in enumerate(probe):
             test[b] = (23.0 + 3 * i, -31.0 + 2 * i, 37.0 - 4 * i)
         await set_tracks(figure, {"bones": {b: {"rotation": [[frame, *v]]} for b, v in test.items()}},
                          extend_range=False)
-        after = await call("anim_sample", {"figure": figure, "frames": [frame], "bones": names})
-        measured = (after["frames"].get(str(frame)) or after["frames"][str(float(frame))])["bones"]
+        # Predict from the dials as Daz holds them now, not from the test values: real
+        # Daz Studio clamps dials to the bone's limits (a Genesis 9 forearm does not
+        # twist 37 degrees) and some dials follow others, so the asked values are not
+        # the pose, and every convention would miss by the same few degrees.
+        after = await call("anim_sample", {"figure": figure, "frames": [frame], "bones": names,
+                                           "dial_bones": names})
+        row = after["frames"].get(str(frame)) or after["frames"][str(float(frame))]
+        measured = row["bones"]
+        dials = {b: tuple(v["rotation"]) for b, v in (row.get("dials") or {}).items()}
+        root_t = tuple((row.get("dials") or {}).get(skel.root(), {}).get("position") or (0.0, 0.0, 0.0))
         errors: dict[str, float | None] = {}
         for conv in motion.CONVENTIONS:
-            pose = dict(dials, **test)
-            predicted, _ = skel.fk(pose, root_t, conv)
+            predicted, _ = skel.fk(dials, root_t, conv)
             errors[conv] = motion.pose_error(skel, predicted, measured)
         scored = [(e, c) for c, e in errors.items() if e is not None]
         if not scored:
@@ -644,6 +646,8 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient]) -> N
             "next": "anim_preview to watch it; anim_foot_contact(fix='lift') if feet go through the floor; "
                     "anim_offset to place it; anim_retime to change its speed.",
         }
+        if res.placement_turn:
+            out["file_placement_removed_deg"] = res.placement_turn
         if calibration:
             out["calibration"] = calibration
         if result.get("not_found"):

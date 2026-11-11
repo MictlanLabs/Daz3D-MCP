@@ -139,7 +139,7 @@ def test_walk_cycle_from_scratch_and_mixamo_on_genesis9(bridge, daz_home, conten
                 assert info["bone_map"]["figure_bones_missing"] == []
                 imported = await tool("anim_import", path=str(mixamo), figure="Leo")
                 assert imported["frames"] == [0, FRAMES - 1] and imported["check_joint_angle_error_deg"] < 1
-                assert imported["calibration"]["convention"] == "applied/qeq"
+                assert imported["calibration"]["convention"] == "applied/qiq"
                 log["mixamo_import"] = imported
                 fix = await tool("anim_foot_contact", figure="Leo", fix="lift")
                 assert fix["after"]["frames_below_floor"] == []

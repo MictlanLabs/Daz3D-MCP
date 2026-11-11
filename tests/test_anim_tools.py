@@ -181,8 +181,8 @@ def test_library_animation_preset(agent):
     assert res["first_frame"] == 30 and res["last_frame"] == 50
 
 
-def _check_walk(agent, frames=(0, 7, 15, 30, 45)):
-    s = agent("anim_sample", figure="Ana", frames=list(frames),
+def _check_walk(agent, figure="Ana", frames=(0, 7, 15, 30, 45)):
+    s = agent("anim_sample", figure=figure, frames=list(frames),
               bones=["l_upperarm", "l_forearm", "r_upperarm", "r_forearm", "l_thigh", "l_shin", "r_thigh", "r_shin",
                      "hip"])
     for f in frames:
@@ -206,7 +206,10 @@ def test_import_mixamo_fbx(agent, daz_home, tmp_path):
     res = agent("anim_import", path=str(fbx), figure="Ana")
     assert res["source_rig"] == "mixamo" and res["figure_rig"] == "genesis9"
     assert res["frames"] == [0, FRAMES - 1] and res["bones_mapped"] == 22
-    assert res["calibration"]["convention"] == "applied/qeq" and res["calibration"]["mean_error_deg"] < 1
+    # Like real Daz, the fake clamps spine1 to its limits: the calibration reads the
+    # dials back, so the convention still fits exactly.
+    assert res["calibration"]["convention"] == "applied/qiq" and res["calibration"]["mean_error_deg"] < 0.1
+    assert "file_placement_removed_deg" not in res
     assert res["check_joint_angle_error_deg"] < 1
     assert res["root_travel_cm"] == pytest.approx(TRAVEL * 100 / 104, rel=0.02)
     assert (daz_home / "animation.json").is_file()
@@ -217,6 +220,25 @@ def test_import_mixamo_fbx(agent, daz_home, tmp_path):
     # Second import: the convention is already known, no calibration.
     res = agent("anim_import", path=str(fbx), figure="Ana", in_place=True, start_frame=100)
     assert "calibration" not in res and res["frames"] == [100, 160] and res["root_travel_cm"] == 0
+
+
+def test_import_daz_exported_fbx_of_a_turned_figure(agent, tmp_path):
+    # Ana turned 90 degrees and walking along +X, exported from Daz: the turn is on
+    # the figure node, not in the bind pose, and the bones are placed with
+    # RotationOffset. Leo must walk his own way forward (+Z).
+    fbx = write_mixamo_fbx(tmp_path / "AnaWalk.fbx", placed=(90.0, (-200.0, 0.0, 100.0)))
+    g9(agent, "Leo")
+    res = agent("anim_import", path=str(fbx), figure="Leo")
+    assert res["file_placement_removed_deg"] == pytest.approx(90, abs=0.1)
+    assert res["floor"] == "the file's floor is at height 0"
+    assert res["check_joint_angle_error_deg"] < 1
+    assert res["root_travel_cm"] == pytest.approx(TRAVEL * 100 / 104, rel=0.02)
+    s = agent("anim_sample", figure="Leo", frames=[0, 60], bones=["hip", "l_thigh", "r_thigh"])["frames"]
+    hip0, hip60 = s["0"]["bones"]["hip"], s["60"]["bones"]["hip"]
+    assert hip0[0] == pytest.approx(0, abs=0.5) and hip0[2] == pytest.approx(0, abs=0.5)
+    assert hip60[0] == pytest.approx(0, abs=1) and hip60[2] == pytest.approx(TRAVEL * 100 / 104, rel=0.02)
+    assert s["0"]["bones"]["l_thigh"][0] > s["0"]["bones"]["r_thigh"][0]  # still faces +Z
+    _check_walk(agent, "Leo")
 
 
 def test_import_finds_another_rotation_convention(agent, monkeypatch, tmp_path):

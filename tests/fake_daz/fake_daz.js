@@ -80,11 +80,13 @@ function side(rows) {
 var G9_BONES = [
 	["hip", "Hip", null, [0, 100, 0], [0, 108, 0], null, "YZX"],
 	["pelvis", "Pelvis", "hip", [0, 100, 0], [0, 88, 0], null, "YZX"],
-	["spine1", "Abdomen Lower", "hip", [0, 106, -1], [0, 116, -1], null, "YZX"],
+	// Rotation limits (the 8th item, [min, max] per axis) as measured on a real
+	// Genesis 9: Daz Studio clamps the dials to them, even on keys.
+	["spine1", "Abdomen Lower", "hip", [0, 106, -1], [0, 116, -1], null, "YZX", [null, [-15, 15], [-15, 15]]],
 	["spine2", "Abdomen Upper", "spine1", [0, 116, -1], [0, 126, -1], null, "YZX"],
 	["spine3", "Chest Lower", "spine2", [0, 126, -1], [0, 136, -1], null, "YZX"],
 	["spine4", "Chest Upper", "spine3", [0, 136, -1], [0, 148, -2], null, "YZX"],
-	["neck1", "Neck Lower", "spine4", [0, 148, -2], [0, 154, -1], null, "YZX"],
+	["neck1", "Neck Lower", "spine4", [0, 148, -2], [0, 154, -1], null, "YZX", [null, [-22, 22], null]],
 	["neck2", "Neck Upper", "neck1", [0, 154, -1], [0, 160, 0], null, "YZX"],
 	["head", "Head", "neck2", [0, 160, 0], [0, 178, 0], null, "YZX"]
 ].concat(side([
@@ -367,7 +369,9 @@ function TransformProp(d, key, index, fallback) {
 	}, function () { return (d[key] || fallback)[index]; }, function (v) {
 		if (!d[key]) { d[key] = fallback.slice(); }
 		d[key][index] = v;
-	});
+	}, key === "rotation" && d.limits && d.limits[index] ? function (v) {
+		return Math.max(d.limits[index][0], Math.min(d.limits[index][1], v));
+	} : null);
 	this.getDefaultValue = function () { return fallback[index]; };
 	this.getLabel = function () { return ({ position: "Translate", rotation: "Rotate" })[key] + " " + "XYZ"[index]; };
 }
@@ -501,9 +505,11 @@ Node.prototype.getOrientation = function () {
 	var q = this.d.orient || [0, 0, 0, 1];
 	return { x: q[0], y: q[1], z: q[2], w: q[3] };
 };
+// Like Daz Studio 6: a DzRotationOrder that prints as its order and holds the
+// enum value in .order (XYZ 0, XZY 1, YXZ 2, YZX 3, ZXY 4, ZYX 5).
 Node.prototype.getRotationOrder = function () {
 	var o = this.d.order || "XYZ";
-	return { toString: function () { return o; } };
+	return { order: ["XYZ", "XZY", "YXZ", "YZX", "ZXY", "ZYX"].indexOf(o), toString: function () { return o; } };
 };
 Node.prototype.boneNodes = function () {
 	var id = this.d.id;
@@ -561,11 +567,12 @@ function material(m) {
 }
 
 // ---------------------------------------------------------- skeleton ----
-// Forward kinematics, with the convention Daz is assumed to use: a bone turns
-// by parent * Q * E * Q^-1 (Q its orientation, E its dials in its rotation
-// order, first letter applied first). DAZMCP_FAKE_CONVENTION picks another
-// one, to test that anim_import finds out which one Daz uses.
-var CONV = (process.env.DAZMCP_FAKE_CONVENTION || "applied/qeq").split("/");
+// Forward kinematics, with the convention real Daz Studio 6.26 uses (measured
+// on a Genesis 9 to 0.01 degrees): a bone turns by parent * Q^-1 * E * Q (Q its
+// orientation, E its dials in its rotation order, first letter applied first).
+// DAZMCP_FAKE_CONVENTION picks another one, to test that anim_import finds out
+// which one Daz uses.
+var CONV = (process.env.DAZMCP_FAKE_CONVENTION || "applied/qiq").split("/");
 
 function valuesOf(d, key, fallback) {
 	return [0, 1, 2].map(function (i) { return new TransformProp(d, key, i, fallback).getValue(); });
@@ -792,7 +799,7 @@ function addFromTemplate(spec, target) {
 	(bones || []).forEach(function (b) {
 		var bone = new Node({ class: "DzBone", name: b[0], label: b[1], parent: (b[2] && made[b[2]]) || node.d.id,
 			skel: node.d.id, position: [0, 0, 0], rotation: [0, 0, 0], origin: b[3] || [0, 0, 0], end: b[4] || null,
-			orient: b[5] || null, order: b[6] || "XYZ" });
+			orient: b[5] || null, order: b[6] || "XYZ", limits: b[7] || null });
 		Scene.addNode(bone);
 		made[b[0]] = bone.d.id;
 	});

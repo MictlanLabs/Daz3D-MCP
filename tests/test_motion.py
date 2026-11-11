@@ -52,6 +52,12 @@ def test_readers_and_rig_detection(tmp_path):
     bvh = motion.read_motion(write_bvh(tmp_path / "w.bvh"))
     assert motion.detect_rig(bvh.names, motion.SOURCE_RIGS)[0] == "cmu"
     assert bvh.names[-1] == "RightToeBase_End"
+    # Daz-style: bones placed with RotationOffset under a turned figure node.
+    daz = motion.read_motion(write_mixamo_fbx(tmp_path / "d.fbx", placed=(90.0, (-200.0, 0.0, 100.0))))
+    hips = [motion.bare(n) for n in daz.names].index("hips")
+    plain = fbx.world_at(0.0)[[motion.bare(n) for n in fbx.names].index("hips")].pos
+    turned = daz.world_at(0.0)[hips].pos
+    assert turned == pytest.approx((plain[2] - 200.0, plain[1], -plain[0] + 100.0), abs=1e-3)
     (tmp_path / "a.fbx").write_text("; FBX 7.4.0 project file\nFBXHeaderExtension:  {\n}\n")
     with pytest.raises(motion.MotionError, match="ASCII"):
         motion.read_motion(tmp_path / "a.fbx")
