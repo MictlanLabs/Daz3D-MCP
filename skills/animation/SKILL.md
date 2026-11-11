@@ -127,8 +127,13 @@ anim_preview()
   gap, pass `bone_map={"file bone": "figure bone"}`; `null` drops a bone.
 - The import adapts the rest pose (Mixamo's T pose to Genesis' A pose), the
   facing direction and the body size, and keys every frame. The first import
-  in a Daz install also measures how Daz turns bones (`calibration`); later
-  imports reuse it.
+  in a Daz install also measures how Daz turns bones (`calibration`, about
+  0.01 degrees off on a real Daz Studio 6); later imports reuse it.
+- A file whose figure was placed or turned (an FBX exported from Daz with the
+  figure turned 90 degrees) is told in the figure's own space:
+  `file_placement_removed_deg` says how much turn was taken out, and the
+  target walks its own way forward (+Z). Turn or move it after with
+  `anim_offset`.
 - `check_joint_angle_error_deg` above about 5 means Daz does not show what was
   computed: look at it with `anim_preview` and tell the user.
 - Fingers come along when both rigs have them. Faces are not in Mixamo files.

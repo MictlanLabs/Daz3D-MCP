@@ -178,7 +178,13 @@ def _p(name: str, kind: str, *values) -> tuple:
     return ("P", [name, kind, "", "A"] + list(values), [])
 
 
-def write_mixamo_fbx(path: Path, prefix: str = "mixamorig:", unit_cm: float = 1.0) -> Path:
+def write_mixamo_fbx(path: Path, prefix: str = "mixamorig:", unit_cm: float = 1.0,
+                     placed: tuple[float, tuple[float, float, float]] | None = None) -> Path:
+    """The test walk as a Mixamo FBX. With placed=(turn, where), written the way
+    Daz Studio exports a figure: the skeleton under a figure node that holds
+    where the figure stands and how it is turned (Y degrees), not in the bind
+    pose, and each bone's place as a RotationOffset with Lcl Translation left
+    for the dials."""
     rest = _rest_world()
     rest_pos = {n: p for n, _parent, p in MIXAMO_JOINTS}
     parent_of = {n: p for n, p, _ in MIXAMO_JOINTS}
@@ -191,16 +197,29 @@ def write_mixamo_fbx(path: Path, prefix: str = "mixamorig:", unit_cm: float = 1.
         euler = mat_euler(local, "XYZ", "applied")
         tr = m_vec(m_t(prot), v_sub(p, rest_pos[parent])) if parent else p
         tr = tuple(v / unit_cm for v in tr)
+        place = [_p("Lcl Translation", "Lcl Translation", *[float(v) for v in tr])]
+        if placed:
+            place = [_p("RotationOffset", "Vector3D", *[float(v) for v in tr])]
         objects.append(("Model", [ids[n], f"{prefix}{n}\x00\x01Model", "LimbNode"], [
             ("Version", [232], []),
             ("Properties70", [], [
                 _p("RotationOrder", "enum", 0),
-                _p("Lcl Translation", "Lcl Translation", *[float(v) for v in tr]),
+                *place,
                 _p("Lcl Rotation", "Lcl Rotation", *[float(v) for v in euler]),
                 _p("Lcl Scaling", "Lcl Scaling", 1.0, 1.0, 1.0),
             ]),
         ]))
-        conns.append(("C", ["OO", ids[n], ids[parent] if parent else 0], []))
+        conns.append(("C", ["OO", ids[n], ids[parent] if parent else (900 if placed else 0)], []))
+    if placed:
+        turn, where = placed
+        objects.append(("Model", [900, "Genesis9\x00\x01Model", "Root"], [
+            ("Version", [232], []),
+            ("Properties70", [], [
+                _p("Lcl Translation", "Lcl Translation", *[float(v / unit_cm) for v in where]),
+                _p("Lcl Rotation", "Lcl Rotation", 0.0, float(turn), 0.0),
+            ]),
+        ]))
+        conns.append(("C", ["OO", 900, 0], []))
 
     # Bind pose: world matrices, column-major, in file units.
     pose_nodes = []
@@ -209,6 +228,9 @@ def write_mixamo_fbx(path: Path, prefix: str = "mixamorig:", unit_cm: float = 1.
         m = [r[0][0], r[1][0], r[2][0], 0.0, r[0][1], r[1][1], r[2][1], 0.0,
              r[0][2], r[1][2], r[2][2], 0.0, p[0] / unit_cm, p[1] / unit_cm, p[2] / unit_cm, 1.0]
         pose_nodes.append(("PoseNode", [], [("Node", [("L", ids[n])], []), ("Matrix", [("d", m)], [])]))
+    if placed:  # Daz binds the figure node unturned, at the origin
+        m = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+        pose_nodes.append(("PoseNode", [], [("Node", [("L", 900)], []), ("Matrix", [("d", m)], [])]))
     objects.append(("Pose", [5000, "Pose::BIND_POSES\x00\x01Pose", "BindPose"],
                     [("Type", ["BindPose"], []), ("NbPoseNodes", [len(pose_nodes)], [])] + pose_nodes))
 
@@ -229,7 +251,9 @@ def write_mixamo_fbx(path: Path, prefix: str = "mixamorig:", unit_cm: float = 1.
             rots.append(e)
         channels = [("R", "Lcl Rotation", rots)]
         if parent is None:
-            channels.append(("T", "Lcl Translation", [tuple(v / unit_cm for v in pos[n]) for _r, pos in poses]))
+            base = rest_pos[n] if placed else (0.0, 0.0, 0.0)
+            channels.append(("T", "Lcl Translation", [tuple((v - b) / unit_cm for v, b in zip(pos[n], base))
+                                                      for _r, pos in poses]))
         for short, prop, values in channels:
             cn = next_id
             next_id += 1

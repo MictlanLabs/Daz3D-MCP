@@ -565,6 +565,12 @@ def read_fbx(path: Path, take: str | None = None) -> SourceMotion:
                 "s": _vec3(p.get("Lcl Scaling"), (1.0, 1.0, 1.0)),
                 "pre": _vec3(p.get("PreRotation"), (0.0, 0.0, 0.0)),
                 "post": _vec3(p.get("PostRotation"), (0.0, 0.0, 0.0)),
+                # Daz Studio exports each bone's place as a RotationOffset (and
+                # keeps Lcl Translation for the dials); others use pivots.
+                "roff": _vec3(p.get("RotationOffset"), (0.0, 0.0, 0.0)),
+                "rpiv": _vec3(p.get("RotationPivot"), (0.0, 0.0, 0.0)),
+                "soff": _vec3(p.get("ScalingOffset"), (0.0, 0.0, 0.0)),
+                "spiv": _vec3(p.get("ScalingPivot"), (0.0, 0.0, 0.0)),
                 "order": _FBX_ORDERS.get(int((p.get("RotationOrder") or [0])[0] or 0), "XYZ"),
                 "parent": None, "anim": {},
             }
@@ -692,13 +698,19 @@ def read_fbx(path: Path, take: str | None = None) -> SourceMotion:
         return (out[0], out[1], out[2])
 
     def local(m: dict, t: float | None) -> Xform:
-        tr = v_scale(channel(m, "t", t), 1.0)
+        # FBX: T * Roff * Rp * Rpre * R * Rpost^-1 * Rp^-1 * Soff * Sp * S * Sp^-1
+        tr = channel(m, "t", t)
         r = euler_mat(channel(m, "r", t), m["order"], "applied")
         pre = euler_mat(m["pre"], "XYZ", "applied")
         post = euler_mat(m["post"], "XYZ", "applied")
         s = channel(m, "s", t)
-        lin = m_mul(m_mul(m_mul(pre, r), m_t(post)), ((s[0], 0.0, 0.0), (0.0, s[1], 0.0), (0.0, 0.0, s[2])))
-        return Xform(lin, tr)
+        rot = m_mul(m_mul(pre, r), m_t(post))
+        sm = ((s[0], 0.0, 0.0), (0.0, s[1], 0.0), (0.0, 0.0, s[2]))
+        lin = m_mul(rot, sm)
+        rp, sp = m["rpiv"], m["spiv"]
+        inner = v_sub(v_add(m["soff"], sp), v_add(m_vec(sm, sp), rp))
+        pos = v_add(v_add(v_add(tr, m["roff"]), rp), m_vec(rot, inner))
+        return Xform(lin, pos)
 
     unit_x = Xform(((unit, 0.0, 0.0), (0.0, unit, 0.0), (0.0, 0.0, unit)), (0.0, 0.0, 0.0))
 
@@ -923,6 +935,7 @@ class RetargetResult:
     floor: str
     root_travel: float
     predicted: dict[int, dict[str, Vec]]  # frame -> bone origins in figure space
+    placement_turn: float = 0.0  # degrees of the file's own placement taken out (see _unplaced)
 
 
 def _role_dir(src: SourceMotion, j: int, rest_pos: list[Vec]) -> Vec | None:
@@ -1030,7 +1043,8 @@ def retarget(src: SourceMotion, tgt: TargetSkeleton, bmap: BoneMap, fps: float, 
         raise MotionError("The source range is empty.")
     count = int(math.floor((end - begin) / speed * fps + 1e-6)) + 1
 
-    first = src.world_at(begin)
+    world_at, placed = _unplaced(src, src_root, begin)
+    first = world_at(begin)
     first_root = m_vec(fix, first[src_root].pos)
     floor_note = "the file's floor is at height 0"
     floor_y = 0.0
@@ -1051,7 +1065,7 @@ def retarget(src: SourceMotion, tgt: TargetSkeleton, bmap: BoneMap, fps: float, 
         if wanted is not None and frame not in wanted:
             continue
         t = begin + f * speed / fps
-        world = src.world_at(t)
+        world = world_at(t)
         world_g: dict[str, Mat] = {}
         dials: dict[str, Vec] = {}
         for name in tgt.order:
@@ -1091,7 +1105,39 @@ def retarget(src: SourceMotion, tgt: TargetSkeleton, bmap: BoneMap, fps: float, 
             predicted[frame] = pos
     return RetargetResult(rotations, root, root_positions, count, (int(round(begin * src.fps)),
                           int(round(end * src.fps))), fps, round(scale, 4), yaw, up, floor_note,
-                          round(travel, 1), predicted)
+                          round(travel, 1), predicted, placed)
+
+
+def _unplaced(src: SourceMotion, root: int, begin: float):
+    """A world_at that takes out where the file placed its character.
+
+    The joints above the mapped root are not mapped (the figure node of an FBX
+    exported from Daz, an Armature object), but they hold how the character
+    was placed: Ana turned 90 degrees to walk along +X keeps that turn there,
+    and her bind pose does not. Their change from the rest pose at the first
+    frame is that placement; it is taken out of every frame, so the motion is
+    told in the character's own space (facing +Z) and the target figure walks
+    its own way forward. Their motion after the first frame stays.
+    Returns (world_at, degrees turned)."""
+    anc = src.parents[root] if 0 <= root < len(src.parents) else -1
+    if anc < 0:
+        return src.world_at, 0.0
+    now = src.world_at(begin)[anc]
+    rest = src.rest[anc]
+    turn = m_mul(orthonormal(now.lin), m_t(orthonormal(rest.lin)))
+    angle = rot_angle(turn)
+    shift = v_len(v_sub(now.pos, rest.pos))
+    if angle < 0.01 and shift < 1e-6:
+        return src.world_at, 0.0
+    back = m_t(turn)
+
+    def world_at(t: float) -> list[Xform]:
+        out = []
+        for x in src.world_at(t):
+            out.append(Xform(m_mul(back, x.lin), v_add(m_vec(back, v_sub(x.pos, now.pos)), rest.pos)))
+        return out
+
+    return world_at, round(angle, 1)
 
 
 def _mapped_below(tgt: TargetSkeleton, name: str, pairs: dict[str, int]) -> list[str]:
