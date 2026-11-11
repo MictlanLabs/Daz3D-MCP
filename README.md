@@ -84,7 +84,10 @@ It is slower but needs nothing compiled.
 | `node_delete` | Deletes nodes (and what is fitted to a figure) |
 | `figure_info` | A figure's generation, height, clothing, morphs in use, posed bones and surfaces |
 | `morph_list` / `morph_set` | Finds and sets shape dials |
-| `pose_bones` / `pose_reset` | Rotates bones / back to the default pose |
+| `pose_bones` / `pose_reset` | Rotates bones (reports dials held at joint limits) / back to the default pose |
+| `prop_surfaces` | Measures where a figure can sit, lie or stand on a prop: height, size, which way a seat faces |
+| `place_on` | Puts a posed figure on a seat, bed or step: faces it out, against the backrest, hips on the cushion |
+| `fit_check` | Per body part: how deep it goes into furniture (and which way is out) or how far it floats |
 | `wearable_fit` | Fits clothing or hair to a figure, or unfits it |
 | `package_inspect` / `package_install` | Looks inside a .zip from another store and installs its content into a library |
 | `package_list` / `package_uninstall` | Lists installed packages / removes exactly the files one installed |
@@ -111,7 +114,7 @@ It is slower but needs nothing compiled.
 | `run_script` | Runs DazScript for anything else (can be disabled) |
 | `daz_guide` | Returns the skills as text for agents without skills support |
 
-Skills: `daz-basics`, `scene-building`, `characters`, `rendering`, `third-party-assets`, `animation`.
+Skills: `daz-basics`, `scene-building`, `characters`, `furniture-poses`, `rendering`, `third-party-assets`, `animation`.
 
 Try it: *"Open ~/Documents/scene.duf in Daz, describe the scene and show me a capture."*
 Or: *"Build a scene with two Genesis 9 characters, dressed and posed, talking

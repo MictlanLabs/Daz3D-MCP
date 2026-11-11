@@ -26,7 +26,9 @@ viewport_capture to look at it. Units are centimeters and Y is up.
 Never discard unsaved work without asking the user.
 To build scenes: content_search finds installed figures, clothing, hair, poses
 and props; content_load adds them (clothing, hair and poses need a target
-figure); figure_info, morph_set and pose_bones adjust characters; camera_create,
+figure); figure_info, morph_set and pose_bones adjust characters; prop_surfaces,
+place_on and fit_check put a posed figure on a chair, sofa or bed without
+floating or passing through it; camera_create,
 light_create and environment_set set up the shot; render makes the final image.
 Content from other stores: package_inspect and package_install put a .zip into
 a content library; import_mesh brings in loose OBJ/FBX models;
@@ -37,7 +39,8 @@ anim_import brings Mixamo FBX or mocap BVH onto a Genesis figure; anim_retime
 and anim_offset change speed, timing and place; anim_foot_contact and
 anim_preview check the result.
 If your client has no skills, read the guides with daz_guide first: daz-basics,
-then scene-building, characters, rendering, third-party-assets and animation.
+then scene-building, characters, furniture-poses, rendering, third-party-assets
+and animation.
 run_script runs free DazScript (ES5 JavaScript) for anything the named tools
 do not cover; prefer the named tools when they exist.
 """

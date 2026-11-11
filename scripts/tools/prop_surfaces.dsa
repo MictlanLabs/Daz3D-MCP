@@ -1,0 +1,26 @@
+// Tool: prop_surfaces
+// The flat surfaces of a prop where a figure can sit, lie or stand (a chair
+// seat, a mattress, a table top, a step), measured from its mesh.
+//
+// args:
+//   node      (string, required) prop label (props under it count too)
+//   min_area  (number, default 150) smallest surface, cm2
+//   max_tilt  (number, default 20) degrees a surface may slope
+
+function dazmcpTool(args) {
+	var node = DazMcp.requireNode(args.node, "node");
+	var found = DazMcp.supportSurfaces(node, { min_area: args.min_area, max_tilt: args.max_tilt });
+	var box = DazMcp.bboxOf([node]);
+	var list = [];
+	var i;
+	for (i = 0; i < found.surfaces.length && i < 30; i++) { list.push(DazMcp.surfaceOut(found.surfaces[i], i)); }
+	var out = {
+		node: node.getLabel(),
+		triangles: found.tris.count,
+		bbox: DazMcp.boxInfo(box),
+		surfaces: list
+	};
+	if (!found.tris.count) { out.hint = node.getLabel() + " has no mesh (a group or an empty node?). Try a prop under it."; }
+	else if (!list.length) { out.hint = "No flat surface bigger than min_area. Lower min_area or raise max_tilt."; }
+	return out;
+}

@@ -5,6 +5,8 @@
 // args:
 //   figure      (string, required) label
 //   all_bones   (bool, default false) list every bone, not only the posed ones
+//   limits      ([string]) bones whose joint limits to report: {x, y, z: [min, max] or null}
+//   landmarks   (bool, default false) lowest point of each body part (world cm)
 
 function dazmcpTool(args) {
 	var fig = DazMcp.requireFigure(args.figure);
@@ -50,5 +52,19 @@ function dazmcpTool(args) {
 	};
 	if (out.type === "fitted_figure") { out.fitted_to = fig.getFollowTarget().getLabel(); }
 	if (args.all_bones === true) { out.bones = list; }
+	if (args.limits && args.limits.length) {
+		out.limits = {};
+		for (i = 0; i < args.limits.length; i++) {
+			b = DazMcp.findBone(fig, args.limits[i]);
+			if (!b) { out.limits[args.limits[i]] = null; continue; }
+			out.limits[String(b.getName())] = {
+				x: DazMcp.limitsOf(b.getXRotControl()), y: DazMcp.limitsOf(b.getYRotControl()),
+				z: DazMcp.limitsOf(b.getZRotControl()),
+				now: [DazMcp.round(b.getXRotControl().getValue(), 1), DazMcp.round(b.getYRotControl().getValue(), 1),
+					DazMcp.round(b.getZRotControl().getValue(), 1)]
+			};
+		}
+	}
+	if (args.landmarks === true) { out.lowest_points = DazMcp.lowestPoints(fig, null); }
 	return out;
 }

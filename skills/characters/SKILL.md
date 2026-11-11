@@ -87,6 +87,11 @@ viewport_capture()
 - After posing, check feet on the floor (`node_set(drop_to_floor=true)` on the
   figure) and hands not passing through the body or clothes (capture from two
   angles with `camera_set(yaw=...)`).
+- `pose_bones` reports dials that Daz held at a joint limit (`clamped`).
+  `figure_info(limits=[...])` lists the limits, and `figure_info(landmarks=true)`
+  says where each body part ends up.
+- Sitting, lying or leaning on furniture: follow the `furniture-poses` skill
+  (`prop_surfaces`, `place_on`, `fit_check`).
 
 ## Materials of a character
 

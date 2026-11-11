@@ -1103,3 +1103,609 @@ DazMcp.rotationOrder = function (bone) {
 	try { if (typeof ro.order === "number") { return names[ro.order] || null; } } catch (e2) { /* none */ }
 	return null;
 };
+
+
+// ======================================================= stage 5 helpers ==
+// Bodies and furniture: world-space meshes, body parts and simple collision
+// tests, so a figure can be put on a seat or a bed and checked with numbers.
+// getCachedGeom() is the mesh as Daz draws it now: posed, morphed and in
+// world space (cm).
+
+// Body part of a bone, for both Genesis 9 (l_thigh, spine1) and Genesis 8
+// (lThighBend, abdomenLower) names. Null for bones that are not body parts.
+DazMcp.bodyPart = function (boneName) {
+	var n = String(boneName);
+	var s = n.toLowerCase();
+	var side = "";
+	if (/^l_/.test(n) || /^l[A-Z]/.test(n)) { side = "left_"; } else if (/^r_/.test(n) || /^r[A-Z]/.test(n)) { side = "right_"; }
+	if (/foot|toe|metatars|heel/.test(s)) { return side + "foot"; }
+	if (/shin|calf/.test(s)) { return side + "shin"; }
+	if (/thigh/.test(s)) { return side + "thigh"; }
+	if (/forearm/.test(s)) { return side + "forearm"; }
+	if (/upperarm|shldr/.test(s)) { return side + "upperarm"; }
+	if (/hand|carpal|thumb|index|mid\d|ring|pinky/.test(s)) { return side + "hand"; }
+	if (/collar|shoulder|clavicle/.test(s)) { return side + "shoulder"; }
+	if (/head|eye|jaw|brow|nose|lip|cheek|tongue|teeth|lid|mouth|chin|squint|nasolabial|ear$|ear\d/.test(s)) { return "head"; }
+	if (/neck/.test(s)) { return "neck"; }
+	if (/abdomen|^spine1$|^spine2$/.test(s)) { return "abdomen"; }
+	if (/chest|^spine3$|^spine4$|pectoral|breast/.test(s)) { return "chest"; }
+	if (/pelvis|^hip$|glute|genital/.test(s)) { return "pelvis"; }
+	return null;
+};
+
+// The big bones whose segments sort mesh points into body parts (fingers,
+// toes and face bones are inside their hand, foot or head anyway).
+DazMcp.isMajorBone = function (boneName, part) {
+	var s = String(boneName).toLowerCase().replace(/^(l_|r_)/, "");
+	if (!part) { return false; }
+	if (/hand|foot|head/.test(part)) { return /^(l|r)?(hand|foot|head)$/.test(s); }
+	return !/breast|pectoral|genital/.test(s);
+};
+
+// World end point of a bone (getEndPoint is in the unposed figure space).
+DazMcp.boneEndWS = function (bone, fig) {
+	var o = bone.getOrigin();
+	var e = bone.getEndPoint();
+	var p = bone.getWSPos();
+	var s = 1;
+	var d;
+	try { s = fig.getScaleControl().getValue(); } catch (e0) { s = 1; }
+	d = new DzVec3((e.x - o.x) * s, (e.y - o.y) * s, (e.z - o.z) * s);
+	try { d = bone.getWSRot().multVec(d); } catch (e1) { /* unrotated */ }
+	return [p.x + d.x, p.y + d.y, p.z + d.z];
+};
+
+DazMcp.bodySegments = function (fig) {
+	var bones = DazMcp.bones(fig);
+	var segs = [];
+	var seen = {};
+	var i, name, part, p;
+	for (i = 0; i < bones.length; i++) {
+		name = String(bones[i].getName());
+		part = DazMcp.bodyPart(name);
+		// a figure can list a bone more than once (Daz 6 does for Genesis 9)
+		if (seen[name] || !DazMcp.isMajorBone(name, part)) { continue; }
+		seen[name] = true;
+		p = bones[i].getWSPos();
+		segs.push({ bone: name, part: part, a: [p.x, p.y, p.z], b: DazMcp.boneEndWS(bones[i], fig) });
+	}
+	return segs;
+};
+
+DazMcp.segDist2 = function (x, y, z, a, b) {
+	var dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
+	var len2 = dx * dx + dy * dy + dz * dz;
+	var t = len2 > 0 ? ((x - a[0]) * dx + (y - a[1]) * dy + (z - a[2]) * dz) / len2 : 0;
+	if (t < 0) { t = 0; } else if (t > 1) { t = 1; }
+	var px = a[0] + dx * t - x, py = a[1] + dy * t - y, pz = a[2] + dz * t - z;
+	return px * px + py * py + pz * pz;
+};
+
+// The mesh as Daz draws it now. Daz rebuilds the cache lazily, so after a
+// script moves or poses something the cache is stale until forceCacheUpdate.
+DazMcp.cachedMesh = function (node) {
+	var obj;
+	try { obj = node.getObject(); } catch (e) { return null; }
+	if (!obj) { return null; }
+	try { obj.forceCacheUpdate(node); } catch (e1) { /* older API */ }
+	try { return obj.getCachedGeom(); } catch (e2) { return null; }
+};
+
+// [min, max] of a rotation dial when Daz clamps it to limits, else null.
+DazMcp.limitsOf = function (ctl) {
+	try {
+		if (ctl.isClamped && !ctl.isClamped()) { return null; }
+		var lo = ctl.getMin(), hi = ctl.getMax();
+		if (lo === undefined || hi === undefined || lo <= -3600 || hi >= 3600) { return null; }
+		return [DazMcp.round(lo, 1), DazMcp.round(hi, 1)];
+	} catch (e) { return null; }
+};
+
+// Lowest point of each body part asked for: {part: [x, y, z]}.
+DazMcp.lowestPoints = function (fig, parts) {
+	var pts = DazMcp.bodySamples(fig, { max: 15000, parts: parts });
+	var low = {}, out = {}, i, part, r = DazMcp.round;
+	for (i = 0; i < pts.x.length; i++) {
+		part = pts.part[i];
+		if (!low[part] || pts.y[i] < low[part][1]) { low[part] = [pts.x[i], pts.y[i], pts.z[i]]; }
+	}
+	for (part in low) {
+		if (low.hasOwnProperty(part)) { out[part] = [r(low[part][0], 1), r(low[part][1], 1), r(low[part][2], 1)]; }
+	}
+	return out;
+};
+
+// Points of a figure's skin (every n-th vertex), each tagged with its body part.
+//   opts.max    most points (default 20000)
+//   opts.box    {min, max}: only points inside it
+//   opts.parts  {part: true}: only points of these parts
+//   opts.worn   also clothing and hair fitted to the figure (part "worn:<part>")
+DazMcp.bodySamples = function (fig, opts) {
+	opts = opts || {};
+	var out = { x: [], y: [], z: [], part: [], total: 0 };
+	var segs = DazMcp.bodySegments(fig);
+	var meshes = [{ node: fig, worn: false }];
+	var i, j, k, g, n, step, v, best, bestD, d, box = opts.box, list;
+	if (opts.worn) {
+		list = DazMcp.followers(fig);
+		for (i = 0; i < list.length; i++) { if (list[i].isVisible()) { meshes.push({ node: list[i], worn: true }); } }
+	}
+	for (k = 0; k < meshes.length; k++) {
+		g = DazMcp.cachedMesh(meshes[k].node);
+		if (!g) { continue; }
+		n = g.getNumVertices();
+		out.total += n;
+		step = Math.max(1, Math.ceil(n / (opts.max || 20000)));
+		for (i = 0; i < n; i += step) {
+			v = g.getVertex(i);
+			if (box && (v.x < box.min[0] || v.x > box.max[0] || v.y < box.min[1] || v.y > box.max[1] ||
+					v.z < box.min[2] || v.z > box.max[2])) { continue; }
+			best = null;
+			bestD = 1e30;
+			for (j = 0; j < segs.length; j++) {
+				d = DazMcp.segDist2(v.x, v.y, v.z, segs[j].a, segs[j].b);
+				if (d < bestD) { bestD = d; best = segs[j].part; }
+			}
+			if (opts.parts && !opts.parts[best]) { continue; }
+			if (meshes[k].worn) { best = "worn:" + (best || "other"); }
+			out.x.push(v.x);
+			out.y.push(v.y);
+			out.z.push(v.z);
+			out.part.push(best || "other");
+		}
+	}
+	return out;
+};
+
+// The nodes whose meshes make up a prop: itself and the props under it.
+DazMcp.propMeshNodes = function (node) {
+	var out = [node];
+	var kids, i, t;
+	try { kids = node.getNodeChildren(true); } catch (e) { kids = []; }
+	for (i = 0; i < kids.length; i++) {
+		t = DazMcp.nodeType(kids[i]);
+		if ((t === "prop" || t === "group") && kids[i].isVisible()) { out.push(kids[i]); }
+	}
+	return out;
+};
+
+// World triangles of nodes, as flat arrays: 9 coordinates per triangle, its
+// unit normal (from the winding: outward on a well made mesh) and its area.
+//   box  {min, max}: keep only triangles that touch it
+DazMcp.meshTriangles = function (nodes, box) {
+	var t = { p: [], n: [], area: [], count: 0, faces: 0 };
+	var k, g, i, f, q, v, nv, vx3 = [], out = [];
+	var add = function (ia, ib, ic) {
+		if (box && (out[ia] & out[ib] & out[ic])) { return; }
+		var a = ia * 3, b = ib * 3, c = ic * 3, P = vx3;
+		var ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2];
+		var vx = P[c] - P[a], vy = P[c + 1] - P[a + 1], vz = P[c + 2] - P[a + 2];
+		var nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+		var len = Math.sqrt(nx * nx + ny * ny + nz * nz);
+		if (len < 1e-9) { return; }
+		t.p.push(P[a], P[a + 1], P[a + 2], P[b], P[b + 1], P[b + 2], P[c], P[c + 1], P[c + 2]);
+		t.n.push(nx / len, ny / len, nz / len);
+		t.area.push(len / 2);
+		t.count++;
+	};
+	for (k = 0; k < nodes.length; k++) {
+		g = DazMcp.cachedMesh(nodes[k]);
+		if (!g || !g.getNumFacets) { continue; }
+		// one read per vertex; out[] holds which sides of the box it is past
+		// (a triangle whose 3 corners share a side is outside the box)
+		nv = g.getNumVertices();
+		vx3 = [];
+		out = [];
+		for (i = 0; i < nv; i++) {
+			v = g.getVertex(i);
+			vx3.push(v.x, v.y, v.z);
+			if (box) {
+				out.push((v.x < box.min[0] ? 1 : 0) | (v.x > box.max[0] ? 2 : 0) | (v.y < box.min[1] ? 4 : 0) |
+					(v.y > box.max[1] ? 8 : 0) | (v.z < box.min[2] ? 16 : 0) | (v.z > box.max[2] ? 32 : 0));
+			}
+		}
+		for (i = 0; i < g.getNumFacets(); i++) {
+			f = g.getFacet(i);
+			q = f.vertIdx4;
+			t.faces++;
+			add(f.vertIdx1, f.vertIdx2, f.vertIdx3);
+			if (q !== undefined && q !== null && q >= 0) { add(f.vertIdx1, f.vertIdx3, q); }
+		}
+	}
+	return t;
+};
+
+// A 2D grid of triangles for lines along one axis (0 = X, 1 = Y, 2 = Z).
+DazMcp.triGrid = function (tris, axis, cell) {
+	var u = axis === 0 ? 1 : 0;
+	var v = axis === 2 ? 1 : 2;
+	var grid = { tris: tris, axis: axis, u: u, v: v, cell: cell || 4, cells: {} };
+	var i, o, umin, umax, vmin, vmax, a, b, key;
+	for (i = 0; i < tris.count; i++) {
+		if (Math.abs(tris.n[i * 3 + axis]) < 1e-4) { continue; }
+		o = i * 9;
+		umin = Math.floor(Math.min(tris.p[o + u], tris.p[o + 3 + u], tris.p[o + 6 + u]) / grid.cell);
+		umax = Math.floor(Math.max(tris.p[o + u], tris.p[o + 3 + u], tris.p[o + 6 + u]) / grid.cell);
+		vmin = Math.floor(Math.min(tris.p[o + v], tris.p[o + 3 + v], tris.p[o + 6 + v]) / grid.cell);
+		vmax = Math.floor(Math.max(tris.p[o + v], tris.p[o + 3 + v], tris.p[o + 6 + v]) / grid.cell);
+		for (a = umin; a <= umax; a++) {
+			for (b = vmin; b <= vmax; b++) {
+				key = a + "," + b;
+				if (!grid.cells[key]) { grid.cells[key] = []; }
+				grid.cells[key].push(i);
+			}
+		}
+	}
+	return grid;
+};
+
+// Where the axis line through point p crosses the triangles: [{t, s, i}] with
+// t the coordinate along the axis and s the sign of the normal along it.
+DazMcp.gridHits = function (grid, p) {
+	var tris = grid.tris, ax = grid.axis, u = grid.u, v = grid.v;
+	var list = grid.cells[Math.floor(p[u] / grid.cell) + "," + Math.floor(p[v] / grid.cell)];
+	var hits = [];
+	var k, i, o, au, av, bu, bv, cu, cv, d, w1, w2, w0;
+	if (!list) { return hits; }
+	for (k = 0; k < list.length; k++) {
+		i = list[k];
+		o = i * 9;
+		au = tris.p[o + u]; av = tris.p[o + v];
+		bu = tris.p[o + 3 + u]; bv = tris.p[o + 3 + v];
+		cu = tris.p[o + 6 + u]; cv = tris.p[o + 6 + v];
+		d = (bv - cv) * (au - cu) + (cu - bu) * (av - cv);
+		if (Math.abs(d) < 1e-12) { continue; }
+		w0 = ((bv - cv) * (p[u] - cu) + (cu - bu) * (p[v] - cv)) / d;
+		w1 = ((cv - av) * (p[u] - cu) + (au - cu) * (p[v] - cv)) / d;
+		w2 = 1 - w0 - w1;
+		if (w0 < -1e-6 || w1 < -1e-6 || w2 < -1e-6) { continue; }
+		hits.push({ t: w0 * tris.p[o + ax] + w1 * tris.p[o + 3 + ax] + w2 * tris.p[o + 6 + ax],
+			s: tris.n[i * 3 + ax] > 0 ? 1 : -1, i: i });
+	}
+	return hits;
+};
+
+// Is p inside the mesh? Along each axis, the nearest surface on each side says
+// "inside" when we see its back. Returns null (outside) or {depth, axis, dir}:
+// the easiest way out, dir +1 or -1 along the axis. Bodies come down onto
+// things, so up counts as shorter and down as longer than it is: a hip that
+// sank 3.5 cm into a 5 cm seat should go up, not out through the bottom.
+DazMcp.insideTest = function (grids, p, maxDepth) {
+	var votesIn = 0, votesOut = 0, best = null;
+	var g, hits, k, up, down, h, said, ax, w;
+	for (g = 0; g < grids.length; g++) {
+		ax = grids[g].axis;
+		hits = DazMcp.gridHits(grids[g], p);
+		up = null;
+		down = null;
+		for (k = 0; k < hits.length; k++) {
+			h = hits[k];
+			if (h.t >= p[ax]) { if (!up || h.t < up.t) { up = h; } } else if (!down || h.t > down.t) { down = h; }
+		}
+		said = 0;
+		if (up) {
+			said += up.s > 0 ? 1 : -1;
+			h = up.t - p[ax];
+			w = h * (ax === 1 ? 0.6 : 1);
+			if (up.s > 0 && h <= maxDepth && (!best || w < best.w)) { best = { depth: h, axis: ax, dir: 1, w: w }; }
+		}
+		if (down) {
+			said += down.s < 0 ? 1 : -1;
+			h = p[ax] - down.t;
+			w = h * (ax === 1 ? 2 : 1);
+			if (down.s < 0 && h <= maxDepth && (!best || w < best.w)) { best = { depth: h, axis: ax, dir: -1, w: w }; }
+		}
+		if (said > 0) { votesIn++; } else if (said < 0) { votesOut++; }
+	}
+	return votesIn > votesOut && best ? best : null;
+};
+
+// Distance from p down to the nearest upward-facing surface below it, or null.
+DazMcp.gapBelow = function (gridY, p, maxGap) {
+	var hits = DazMcp.gridHits(gridY, p);
+	var best = null, k, d;
+	for (k = 0; k < hits.length; k++) {
+		if (hits[k].s > 0 && hits[k].t <= p[1] + 0.01) {
+			d = p[1] - hits[k].t;
+			if (d <= maxGap && (best === null || d < best)) { best = d; }
+		}
+	}
+	return best;
+};
+
+// A node's world rotation applied to the vector v.
+DazMcp.nodeDir = function (node, v) {
+	var r;
+	try { r = node.getWSRot().multVec(new DzVec3(v[0], v[1], v[2])); return [r.x, r.y, r.z]; } catch (e) { /* by angle */ }
+	var yaw = node.getYRotControl().getValue() * Math.PI / 180;
+	return [v[0] * Math.cos(yaw) + v[2] * Math.sin(yaw), v[1], -v[0] * Math.sin(yaw) + v[2] * Math.cos(yaw)];
+};
+
+// Flat surfaces to sit, lie or stand on: upward-facing triangles at one
+// height, split into pieces that touch in X/Z.
+//   opts.min_area (cm2, default 150), opts.max_tilt (degrees, default 20)
+DazMcp.supportSurfaces = function (node, opts) {
+	opts = opts || {};
+	var tris = DazMcp.meshTriangles(DazMcp.propMeshNodes(node), opts.box || null);
+	var cosT = Math.cos((opts.max_tilt === undefined ? 20 : opts.max_tilt) * Math.PI / 180);
+	var minArea = opts.min_area === undefined ? 150 : opts.min_area;
+	var bins = {}, keys = [], i, o, cy, key, k, clusters = [], cur = null, last = null;
+	for (i = 0; i < tris.count; i++) {
+		if (tris.n[i * 3 + 1] < cosT) { continue; }
+		o = i * 9;
+		cy = (tris.p[o + 1] + tris.p[o + 4] + tris.p[o + 7]) / 3;
+		key = Math.floor(cy);
+		if (!bins[key]) { bins[key] = []; keys.push(key); }
+		bins[key].push(i);
+	}
+	keys.sort(function (a, b) { return a - b; });
+	for (k = 0; k < keys.length; k++) {
+		if (cur && keys[k] - last <= 2) { cur = cur.concat(bins[keys[k]]); } else {
+			if (cur) { clusters.push(cur); }
+			cur = bins[keys[k]].slice();
+		}
+		last = keys[k];
+	}
+	if (cur) { clusters.push(cur); }
+
+	var ax = DazMcp.nodeDir(node, [1, 0, 0]);
+	var az = DazMcp.nodeDir(node, [0, 0, 1]);
+	var surfaces = [];
+	var c, j, pieces;
+	for (c = 0; c < clusters.length; c++) {
+		pieces = DazMcp._splitPieces(tris, clusters[c], 5);
+		for (j = 0; j < pieces.length; j++) { surfaces.push(DazMcp._surfaceInfo(tris, pieces[j], ax, az)); }
+	}
+	surfaces = surfaces.filter(function (s) { return s.area >= minArea; });
+	surfaces.sort(function (p1, p2) { return p2.area - p1.area; });
+	for (i = 0; i < surfaces.length && i < 12; i++) { DazMcp._surfaceFront(tris, surfaces[i], ax, az); }
+	return { surfaces: surfaces, tris: tris };
+};
+
+// Splits triangles into groups that touch, over a grid of `cell` cm in X/Z.
+DazMcp._splitPieces = function (tris, list, cell) {
+	var cellOf = {}, owner = {}, pieces = [], keys = [];
+	var j, i, o, key, piece, stack, idx, a, x, z, nb, m, x0, x1, z0, z1;
+	for (j = 0; j < list.length; j++) {
+		i = list[j];
+		o = i * 9;
+		x0 = Math.floor(Math.min(tris.p[o], tris.p[o + 3], tris.p[o + 6]) / cell);
+		x1 = Math.floor(Math.max(tris.p[o], tris.p[o + 3], tris.p[o + 6]) / cell);
+		z0 = Math.floor(Math.min(tris.p[o + 2], tris.p[o + 5], tris.p[o + 8]) / cell);
+		z1 = Math.floor(Math.max(tris.p[o + 2], tris.p[o + 5], tris.p[o + 8]) / cell);
+		for (x = x0; x <= x1; x++) {
+			for (z = z0; z <= z1; z++) {
+				key = x + "," + z;
+				if (!cellOf[key]) { cellOf[key] = []; keys.push(key); }
+				cellOf[key].push(i);
+			}
+		}
+	}
+	for (m = 0; m < keys.length; m++) {
+		key = keys[m];
+		if (owner[key] !== undefined) { continue; }
+		piece = {};
+		owner[key] = pieces.length;
+		stack = [key];
+		while (stack.length) {
+			idx = stack.pop();
+			for (j = 0; j < cellOf[idx].length; j++) { piece[cellOf[idx][j]] = true; }
+			a = idx.split(",");
+			for (x = -1; x <= 1; x++) {
+				for (z = -1; z <= 1; z++) {
+					nb = (parseInt(a[0], 10) + x) + "," + (parseInt(a[1], 10) + z);
+					if (cellOf[nb] && owner[nb] === undefined) { owner[nb] = pieces.length; stack.push(nb); }
+				}
+			}
+		}
+		pieces.push(piece);
+	}
+	return pieces;
+};
+
+DazMcp._surfaceInfo = function (tris, piece, ax, az) {
+	var area = 0, sy = 0, sx = 0, sz = 0, ymin = 1e30, ymax = -1e30;
+	var min = [1e30, 1e30], max = [-1e30, -1e30], lx = [1e30, -1e30], lz = [1e30, -1e30];
+	var list = [], key, i, o, k, ar, x, y, z, dx, dz;
+	for (key in piece) {
+		if (!piece.hasOwnProperty(key)) { continue; }
+		i = parseInt(key, 10);
+		list.push(i);
+		o = i * 9;
+		ar = tris.area[i];
+		area += ar;
+		for (k = 0; k < 3; k++) {
+			x = tris.p[o + k * 3]; y = tris.p[o + k * 3 + 1]; z = tris.p[o + k * 3 + 2];
+			sx += x * ar / 3; sy += y * ar / 3; sz += z * ar / 3;
+			if (y < ymin) { ymin = y; }
+			if (y > ymax) { ymax = y; }
+			if (x < min[0]) { min[0] = x; }
+			if (x > max[0]) { max[0] = x; }
+			if (z < min[1]) { min[1] = z; }
+			if (z > max[1]) { max[1] = z; }
+			dx = x * ax[0] + z * ax[2];
+			dz = x * az[0] + z * az[2];
+			if (dx < lx[0]) { lx[0] = dx; }
+			if (dx > lx[1]) { lx[1] = dx; }
+			if (dz < lz[0]) { lz[0] = dz; }
+			if (dz > lz[1]) { lz[1] = dz; }
+		}
+	}
+	return { tris: list, area: area, y: sy / area, y_min: ymin, y_max: ymax,
+		center: [sx / area, sy / area, sz / area], xz_min: min, xz_max: max,
+		size: [lx[1] - lx[0], lz[1] - lz[0]] };
+};
+
+// A seat has a back: geometry rising above the surface on one side. front is
+// the horizontal direction away from it, or null when there is no back.
+DazMcp._surfaceFront = function (tris, s, ax, az) {
+	var pad = 8, sx = 0, sz = 0, w = 0, i, o, k, cx, cy, cz, ar, d, len, reach;
+	for (i = 0; i < tris.count; i++) {
+		o = i * 9;
+		cx = (tris.p[o] + tris.p[o + 3] + tris.p[o + 6]) / 3;
+		cy = (tris.p[o + 1] + tris.p[o + 4] + tris.p[o + 7]) / 3;
+		cz = (tris.p[o + 2] + tris.p[o + 5] + tris.p[o + 8]) / 3;
+		if (cy < s.y_max + 8 || cy > s.y + 120) { continue; }
+		if (cx < s.xz_min[0] - pad || cx > s.xz_max[0] + pad || cz < s.xz_min[1] - pad || cz > s.xz_max[1] + pad) { continue; }
+		ar = tris.area[i];
+		sx += cx * ar; sz += cz * ar; w += ar;
+	}
+	s.front = null;
+	if (w < s.area * 0.15) { return; }
+	d = [sx / w - s.center[0], sz / w - s.center[2]];
+	len = Math.sqrt(d[0] * d[0] + d[1] * d[1]);
+	if (len < 0.15 * Math.min(s.size[0], s.size[1])) { return; }
+	s.front = [-d[0] / len, 0, -d[1] / len];
+	// furniture is modeled square to its own axes: snap to the nearest one
+	var axes = [ax, az, [-ax[0], 0, -ax[2]], [-az[0], 0, -az[2]]], bestDot = 0, bestAx = null, dot, hl;
+	for (k = 0; k < 4; k++) {
+		hl = Math.sqrt(axes[k][0] * axes[k][0] + axes[k][2] * axes[k][2]);
+		if (hl < 0.5) { continue; }
+		dot = (axes[k][0] * s.front[0] + axes[k][2] * s.front[2]) / hl;
+		if (dot > bestDot) { bestDot = dot; bestAx = [axes[k][0] / hl, 0, axes[k][2] / hl]; }
+	}
+	if (bestAx && bestDot > Math.cos(30 * Math.PI / 180)) { s.front = bestAx; }
+	reach = 0;
+	for (k = 0; k < s.tris.length; k++) {
+		o = s.tris[k] * 9;
+		for (i = 0; i < 3; i++) {
+			d = -((tris.p[o + i * 3] - s.center[0]) * s.front[0] + (tris.p[o + i * 3 + 2] - s.center[2]) * s.front[2]);
+			if (d > reach) { reach = d; }
+		}
+	}
+	s.back_reach = reach;
+};
+
+DazMcp.surfaceOut = function (s, index) {
+	var r = DazMcp.round;
+	var out = { index: index, height: r(s.y, 1), height_range: [r(s.y_min, 1), r(s.y_max, 1)], area_cm2: Math.round(s.area),
+		size_cm: [r(s.size[0], 1), r(s.size[1], 1)], center: [r(s.center[0], 1), r(s.center[1], 1), r(s.center[2], 1)],
+		bounds_xz: { min: [r(s.xz_min[0], 1), r(s.xz_min[1], 1)], max: [r(s.xz_max[0], 1), r(s.xz_max[1], 1)] } };
+	if (s.front) {
+		out.front = [r(s.front[0], 3), 0, r(s.front[2], 3)];
+		out.facing_yaw = r(Math.atan2(s.front[0], s.front[2]) * 180 / Math.PI, 1);
+		out.back_edge_cm = r(s.back_reach, 1);
+	}
+	return out;
+};
+
+DazMcp.padBox = function (box, d) {
+	return { min: [box.min[0] - d, box.min[1] - d, box.min[2] - d], max: [box.max[0] + d, box.max[1] + d, box.max[2] + d] };
+};
+
+// Which way the figure looks and where its left is (Genesis faces +Z, its
+// left side is +X).
+DazMcp.figureFrame = function (fig) {
+	return { forward: DazMcp.nodeDir(fig, [0, 0, 1]), left: DazMcp.nodeDir(fig, [1, 0, 0]) };
+};
+
+// "up", "back", "left"... for a world direction, as the figure sees it.
+DazMcp.dirWord = function (frame, v) {
+	var f = v[0] * frame.forward[0] + v[1] * frame.forward[1] + v[2] * frame.forward[2];
+	var l = v[0] * frame.left[0] + v[1] * frame.left[1] + v[2] * frame.left[2];
+	var u = v[1];
+	if (Math.abs(u) >= Math.abs(f) && Math.abs(u) >= Math.abs(l)) { return u > 0 ? "up" : "down"; }
+	if (Math.abs(f) >= Math.abs(l)) { return f > 0 ? "forward" : "back"; }
+	return l > 0 ? "left" : "right";
+};
+
+DazMcp._trisBox = function (tris) {
+	var min = [1e30, 1e30, 1e30], max = [-1e30, -1e30, -1e30], i, k;
+	for (i = 0; i < tris.p.length; i += 3) {
+		for (k = 0; k < 3; k++) {
+			if (tris.p[i + k] < min[k]) { min[k] = tris.p[i + k]; }
+			if (tris.p[i + k] > max[k]) { max[k] = tris.p[i + k]; }
+		}
+	}
+	return { min: min, max: max };
+};
+
+// Collision report of a figure against other nodes (props or figures): per
+// body part, how deep it goes into them and which way is out, or how far it
+// floats above the surface under it.
+//   opts.max_depth  deepest overlap that counts (cm, default 15)
+//   opts.worn       also test clothing and hair
+//   opts.samples    most skin points (default 20000)
+//   opts.tolerance  overlap that still counts as resting on it (cm, default 1)
+DazMcp.fitCheck = function (fig, against, opts) {
+	opts = opts || {};
+	var maxDepth = opts.max_depth || 15;
+	var r = DazMcp.round;
+	var fbox = DazMcp.bboxOf([fig]);
+	var frame = DazMcp.figureFrame(fig);
+	var report = { figure: fig.getLabel(), against: [], overlapping: false, parts: {}, touching: [] };
+	var a, nodes, tris, grids, tb, pts, i, p, hit, part, rec, gap, axisV, name, word, wbest;
+	if (!fbox) { throw DazMcp.fail("no_geometry", fig.getLabel() + " has no mesh to test."); }
+	pts = DazMcp.bodySamples(fig, { max: opts.samples || 20000, worn: opts.worn });
+	for (a = 0; a < against.length; a++) {
+		nodes = DazMcp.inherits(against[a], "DzSkeleton") ? [against[a]] : DazMcp.propMeshNodes(against[a]);
+		tris = DazMcp.meshTriangles(nodes, DazMcp.padBox(fbox, 2));
+		report.against.push({ node: against[a].getLabel(), triangles_near: tris.count });
+		if (!tris.count) { continue; }
+		grids = [DazMcp.triGrid(tris, 1, 4), DazMcp.triGrid(tris, 0, 4), DazMcp.triGrid(tris, 2, 4)];
+		tb = DazMcp._trisBox(tris);
+		for (i = 0; i < pts.x.length; i++) {
+			p = [pts.x[i], pts.y[i], pts.z[i]];
+			if (p[0] < tb.min[0] - 30 || p[0] > tb.max[0] + 30 || p[1] < tb.min[1] - 30 || p[1] > tb.max[1] + 30 ||
+				p[2] < tb.min[2] - 30 || p[2] > tb.max[2] + 30) { continue; }
+			part = pts.part[i];
+			rec = report.parts[part];
+			hit = (p[0] >= tb.min[0] && p[0] <= tb.max[0] && p[1] >= tb.min[1] && p[1] <= tb.max[1] &&
+				p[2] >= tb.min[2] && p[2] <= tb.max[2]) ? DazMcp.insideTest(grids, p, maxDepth) : null;
+			if (hit) {
+				if (!rec) { rec = report.parts[part] = {}; }
+				rec.inside_points = (rec.inside_points || 0) + 1;
+				// tally the ways out; the part goes the way most of its depth says
+				axisV = [0, 0, 0];
+				axisV[hit.axis] = hit.dir;
+				word = DazMcp.dirWord(frame, axisV);
+				if (!rec._ways) { rec._ways = {}; }
+				if (!rec._ways[word]) { rec._ways[word] = { sum: 0, max: 0, point: null, world: axisV, into: against[a].getLabel() }; }
+				rec._ways[word].sum += hit.depth;
+				if (hit.depth >= rec._ways[word].max) {
+					rec._ways[word].max = hit.depth;
+					rec._ways[word].point = [r(p[0], 1), r(p[1], 1), r(p[2], 1)];
+				}
+				continue;
+			}
+			gap = DazMcp.gapBelow(grids[0], p, 30);
+			if (gap !== null) {
+				if (!rec) { rec = report.parts[part] = {}; }
+				if (rec.gap_below_cm === undefined || gap < rec.gap_below_cm) { rec.gap_below_cm = gap; rec.above = against[a].getLabel(); }
+			}
+		}
+	}
+	var hints = [], up = 0, side = [];
+	var tol = opts.tolerance === undefined || opts.tolerance === null ? 1 : opts.tolerance;
+	for (name in report.parts) {
+		if (!report.parts.hasOwnProperty(name)) { continue; }
+		rec = report.parts[name];
+		if (rec.gap_below_cm !== undefined) { rec.gap_below_cm = r(rec.gap_below_cm, 1); }
+		if (rec._ways) {
+			wbest = null;
+			for (word in rec._ways) {
+				if (rec._ways.hasOwnProperty(word) && (!wbest || rec._ways[word].sum > rec._ways[wbest].sum)) { wbest = word; }
+			}
+			rec.max_depth_cm = rec._ways[wbest].max;
+			rec.way_out = wbest;
+			rec.way_out_world = rec._ways[wbest].world;
+			rec.deepest_point = rec._ways[wbest].point;
+			rec.into = rec._ways[wbest].into;
+			delete rec._ways;
+		}
+		if (rec.max_depth_cm !== undefined) {
+			rec.max_depth_cm = r(rec.max_depth_cm, 1);
+			if (rec.max_depth_cm > tol) {
+				report.overlapping = true;
+				if (rec.way_out === "up") { up = Math.max(up, rec.max_depth_cm); } else { side.push(name + " " + rec.max_depth_cm + " cm (way out: " + rec.way_out + ")"); }
+				continue;
+			}
+		}
+		if (rec.max_depth_cm !== undefined || rec.gap_below_cm <= 1.5) { report.touching.push(name); }
+	}
+	if (up > 0) { hints.push("Parts sink up to " + up + " cm into the surface under them: raise the figure about that much, or pose those parts to rest on top."); }
+	if (side.length) { hints.push("Parts pass through the side of something: " + side.join("; ") + ". Move the figure that way or pose those parts away."); }
+	if (!report.overlapping && !report.touching.length) { hints.push("Nothing touches: the figure floats above or stands apart from these nodes."); }
+	report.hints = hints;
+	return report;
+};

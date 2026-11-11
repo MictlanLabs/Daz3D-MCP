@@ -372,10 +372,21 @@ function TransformProp(d, key, index, fallback) {
 		if (!d[key]) { d[key] = fallback.slice(); }
 		d[key][index] = v;
 	}, key === "rotation" && d.limits && d.limits[index] ? function (v) {
+		if (d.limitsOff && d.limitsOff[index]) { return v; }
 		return Math.max(d.limits[index][0], Math.min(d.limits[index][1], v));
 	} : null);
 	this.getDefaultValue = function () { return fallback[index]; };
 	this.getLabel = function () { return ({ position: "Translate", rotation: "Rotate" })[key] + " " + "XYZ"[index]; };
+	// Joint limits: Daz clamps rotation dials to [min, max] unless limits are off.
+	var lim = key === "rotation" && d.limits && d.limits[index];
+	this.isClamped = function () { return !!lim && !(d.limitsOff && d.limitsOff[index]); };
+	this.setIsClamped = function (on) {
+		d.limitsOff = d.limitsOff || [false, false, false];
+		d.limitsOff[index] = !on;
+		changed();
+	};
+	this.getMin = function () { return lim ? lim[0] : -10000; };
+	this.getMax = function () { return lim ? lim[1] : 10000; };
 }
 
 function propertyHost(props) {
@@ -533,9 +544,17 @@ Node.prototype.getFocalLength = function () {
 	var p = this.d.props && this.d.props["Focal Length"];
 	return p ? p.value : (this.d.focal_length || 65);
 };
+// World rotation: bones by forward kinematics, other nodes by their own
+// rotation (Y, then Z, then X, like Daz), parents ignored.
+Node.prototype.getWSRot = function () {
+	var R = this.d.class === "DzBone" && this.d.origin ? boneWorld(this.d).R
+		: eulerM(valuesOf(this.d, "rotation", [0, 0, 0]), "YZX", "applied");
+	return { multVec: function (v) { return new Vec(mvec(R, [v.x, v.y, v.z])); } };
+};
 Node.prototype.getObject = function () {
 	var d = this.d;
-	if (!d.geometry && !d.morphs && !d.materials) { return null; }
+	var self = this;
+	if (!d.geometry && !d.morphs && !d.materials && !d.mesh_boxes) { return null; }
 	var morphs = d.morphs || [];
 	var mats = d.materials || [];
 	return {
@@ -550,6 +569,8 @@ Node.prototype.getObject = function () {
 				getValueControl: function () { return new Prop(m, m.label); }
 			};
 		},
+		forceCacheUpdate: function () { /* the fake builds the mesh on demand */ },
+		getCachedGeom: function () { return fakeMesh(self); },
 		getCurrentShape: function () {
 			return {
 				getNumMaterials: function () { return mats.length; },
@@ -558,6 +579,87 @@ Node.prototype.getObject = function () {
 		}
 	};
 };
+
+// ------------------------------------------------------------ meshes ----
+// The world-space mesh getCachedGeom() returns. Props describe theirs as
+// boxes in local space ("mesh_boxes": [[min, max], ...]); a figure gets a
+// tube around each bone, so posing it moves its "skin".
+var TUBE_RADIUS = { hip: 13, pelvis: 13, spine1: 12, spine2: 12, spine3: 13, spine4: 12, neck1: 5, neck2: 5,
+	head: 9, shoulder: 5, upperarm: 4.5, forearm: 3.5, hand: 2.5, thigh: 7.5, shin: 5, foot: 4, toes: 3 };
+
+function sub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
+function cross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+function norm(a) { var l = Math.sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; }
+function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+
+function meshBuilder() {
+	var m = { v: [], f: [] };
+	// adds a quad, flipped if needed so its normal points away from `inside`
+	m.quad = function (a, b, c, d, inside) {
+		var n = cross(sub(m.v[b], m.v[a]), sub(m.v[c], m.v[a]));
+		var mid = [(m.v[a][0] + m.v[c][0]) / 2, (m.v[a][1] + m.v[c][1]) / 2, (m.v[a][2] + m.v[c][2]) / 2];
+		m.f.push(dot(n, sub(mid, inside)) >= 0 ? [a, b, c, d] : [a, d, c, b]);
+	};
+	return m;
+}
+
+function fakeMesh(node) {
+	var d = node.d;
+	var m = meshBuilder();
+	if (d.mesh_boxes) {
+		var p = node.getWSPos(), sc = node.getWSScale();
+		var R = eulerM(valuesOf(d, "rotation", [0, 0, 0]), "YZX", "applied");
+		d.mesh_boxes.forEach(function (box) {
+			var base = m.v.length, c = [0, 0, 0];
+			for (var i = 0; i < 8; i++) {
+				var l = [box[i & 1 ? 1 : 0][0], box[i & 2 ? 1 : 0][1], box[i & 4 ? 1 : 0][2]];
+				var w = mvec(R, [l[0] * sc, l[1] * sc, l[2] * sc]);
+				m.v.push([p.x + w[0], p.y + w[1], p.z + w[2]]);
+				c = [c[0] + m.v[base + i][0] / 8, c[1] + m.v[base + i][1] / 8, c[2] + m.v[base + i][2] / 8];
+			}
+			[[0, 1, 3, 2], [4, 5, 7, 6], [0, 1, 5, 4], [2, 3, 7, 6], [0, 2, 6, 4], [1, 3, 7, 5]].forEach(function (q) {
+				m.quad(base + q[0], base + q[1], base + q[2], base + q[3], c);
+			});
+		});
+	} else if (node.inherits("DzSkeleton")) {
+		node.boneNodes().forEach(function (b) {
+			var bd = b.d;
+			if (!bd.origin || !bd.end) { return; }
+			var key = bd.name.replace(/^[lr]_/, "");
+			var r = TUBE_RADIUS[key] || 3;
+			var W = boneWorld(bd);
+			var e = mvec(W.R, [(bd.end[0] - bd.origin[0]) * W.s, (bd.end[1] - bd.origin[1]) * W.s, (bd.end[2] - bd.origin[2]) * W.s]);
+			var a = W.P, axis = norm(e);
+			var u = norm(cross(axis, Math.abs(axis[2]) > 0.9 ? [1, 0, 0] : [0, 0, 1]));
+			var v = cross(axis, u);
+			var base = m.v.length, rings = 5, around = 8, i, j;
+			for (i = 0; i < rings; i++) {
+				var t = i / (rings - 1);
+				for (j = 0; j < around; j++) {
+					var ang = 2 * Math.PI * j / around, cs = Math.cos(ang) * r * W.s, sn = Math.sin(ang) * r * W.s;
+					m.v.push([a[0] + e[0] * t + u[0] * cs + v[0] * sn, a[1] + e[1] * t + u[1] * cs + v[1] * sn,
+						a[2] + e[2] * t + u[2] * cs + v[2] * sn]);
+				}
+			}
+			for (i = 0; i < rings - 1; i++) {
+				var mid = [a[0] + e[0] * (i + 0.5) / (rings - 1), a[1] + e[1] * (i + 0.5) / (rings - 1), a[2] + e[2] * (i + 0.5) / (rings - 1)];
+				for (j = 0; j < around; j++) {
+					m.quad(base + i * around + j, base + i * around + (j + 1) % around,
+						base + (i + 1) * around + (j + 1) % around, base + (i + 1) * around + j, mid);
+				}
+			}
+		});
+	}
+	return {
+		getNumVertices: function () { return m.v.length; },
+		getVertex: function (i) { return new Vec(m.v[i]); },
+		getNumFacets: function () { return m.f.length; },
+		getFacet: function (i) {
+			var f = m.f[i];
+			return { vertIdx1: f[0], vertIdx2: f[1], vertIdx3: f[2], vertIdx4: f.length > 3 ? f[3] : -1 };
+		}
+	};
+}
 
 function material(m) {
 	var host = propertyHost(m.props);

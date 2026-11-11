@@ -185,10 +185,16 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient]) -> C
     async def figure_info(
         figure: Annotated[str, Field(description="Figure label.")],
         all_bones: Annotated[bool, Field(description="List every bone name (for pose_bones).")] = False,
+        limits: Annotated[list[str] | None, Field(description="Bones whose joint limits to report, e.g. "
+                                                              "[\"l_upperarm\", \"l_thigh\"]: [min, max] "
+                                                              "degrees per axis.")] = None,
+        landmarks: Annotated[bool, Field(description="Lowest world point of each body part (hips, "
+                                                     "thighs, feet, hands...).")] = False,
     ) -> dict:
         """Describes a figure: generation, height, what it wears, the shape dials in use, the posed
-        bones and its surfaces."""
-        return await call("figure_info", {"figure": figure, "all_bones": all_bones})
+        bones and its surfaces; optionally joint limits and where its body parts are."""
+        return await call("figure_info", _clean(figure=figure, all_bones=all_bones, limits=limits,
+                                                landmarks=landmarks or None))
 
     @mcp.tool(annotations=READ_ONLY)
     async def morph_list(
@@ -217,14 +223,69 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient]) -> C
         bones: Annotated[dict[str, Vec3], Field(description="{bone name: [x, y, z] degrees}, e.g. "
                                                             "{\"l_upperarm\": [0, 0, -40]}.")],
         relative: Annotated[bool, Field(description="Add to the current rotation.")] = False,
+        ignore_limits: Annotated[bool, Field(description="Turn off these bones' joint limits first. Daz "
+                                                         "clamps dials to the limits; the result lists "
+                                                         "clamped values.")] = False,
     ) -> dict:
-        """Rotates figure bones, for adjustments after a pose preset (head turn, arm angle)."""
-        return await call("pose_bones", {"figure": figure, "bones": bones, "relative": relative})
+        """Rotates figure bones, for adjustments after a pose preset or to build a pose. Reports
+        dials that Daz held at a joint limit."""
+        return await call("pose_bones", {"figure": figure, "bones": bones, "relative": relative,
+                                         "ignore_limits": ignore_limits})
 
     @mcp.tool(annotations=CHANGES_SCENE)
     async def pose_reset(figure: Annotated[str, Field(description="Figure label.")]) -> dict:
         """Returns all the bones of a figure to the default pose."""
         return await call("pose_reset", {"figure": figure})
+
+    # ------------------------------------------------ figures on props ----
+    @mcp.tool(annotations=READ_ONLY)
+    async def prop_surfaces(
+        node: Annotated[str, Field(description="Prop label: chair, sofa, bed, table, stairs...")],
+        min_area: Annotated[float, Field(gt=0, description="Smallest surface, cm2.")] = 150,
+        max_tilt: Annotated[float, Field(ge=0, le=60, description="Degrees a surface may slope.")] = 20,
+    ) -> dict:
+        """Measures the flat surfaces of a prop where a figure can sit, lie or stand: height,
+        size, center and, for a seat with a backrest, which way it faces (facing_yaw)."""
+        return await call("prop_surfaces", {"node": node, "min_area": min_area, "max_tilt": max_tilt})
+
+    @mcp.tool(annotations=CHANGES_SCENE)
+    async def place_on(
+        figure: Annotated[str, Field(description="Figure label, already posed (sitting, lying...).")],
+        prop: Annotated[str, Field(description="Prop to put it on.")],
+        contact: Annotated[Literal["seat", "feet", "back", "front", "left_side", "right_side"],
+                           Field(description="What rests on the surface: seat = hips (sitting), back = "
+                                             "lying face up, front = face down, feet = standing.")] = "seat",
+        surface: Annotated[int | None, Field(ge=0, description="Index from prop_surfaces; default picks "
+                                                                "one for the contact.")] = None,
+        facing: Annotated[float | Literal["auto", "keep"], Field(description="Yaw in degrees; auto faces "
+                                                                             "out of a seat.")] = "auto",
+        at: Annotated[list[float] | None, Field(min_length=2, max_length=2,
+                                                description="[x, z] world point for the contact.")] = None,
+        back_gap: Annotated[float | None, Field(ge=0, description="Seat: cm between backrest and back "
+                                                                   "(default 1).")] = None,
+        sink: Annotated[float, Field(ge=0, le=10, description="cm the contact sinks into a soft "
+                                                              "cushion or mattress.")] = 0.5,
+    ) -> dict:
+        """Puts a posed figure on a prop: hips on a seat (turned to face out, against the backrest,
+        knees clear of the seat front), back on a bed, feet on a step. Then reports fit_check."""
+        return await call("place_on", _clean(figure=figure, prop=prop, contact=contact, surface=surface,
+                                             facing=facing, at=at, back_gap=back_gap, sink=sink),
+                          timeout=180)
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def fit_check(
+        figure: Annotated[str, Field(description="Figure label.")],
+        against: Annotated[list[str] | None, Field(description="Props or figures to test; default every "
+                                                               "visible prop touching the figure.")] = None,
+        floor_y: Annotated[float | None, Field(description="Also report each foot's height above this "
+                                                           "floor height.")] = None,
+        worn: Annotated[bool, Field(description="Also test clothing and hair.")] = False,
+        max_depth: Annotated[float, Field(gt=0, le=100, description="Deepest overlap that counts, cm.")] = 15,
+    ) -> dict:
+        """Checks a figure against furniture or other figures, per body part: how deep it goes into
+        them and which way is out, or how far it floats above the surface under it."""
+        return await call("fit_check", _clean(figure=figure, against=against, floor_y=floor_y, worn=worn,
+                                              max_depth=max_depth), timeout=180)
 
     @mcp.tool(annotations=CHANGES_SCENE)
     async def wearable_fit(

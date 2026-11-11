@@ -6,13 +6,16 @@
 //   bones    (object, required) {bone name or label: [x, y, z] degrees}
 //            axes depend on the bone; see the characters skill
 //   relative (bool, default false) add to the current rotation
+//   ignore_limits (bool, default false) turn off the joint limits of these
+//            bones first (Daz clamps every dial to its limits)
 
 function dazmcpTool(args) {
 	var fig = DazMcp.requireFigure(args.figure);
 	var bones = args.bones || {};
 	var set = [];
 	var notFound = [];
-	var key, bone, rot, now;
+	var clamped = [];
+	var key, bone, rot, now, ctl, got, a;
 	for (key in bones) {
 		if (!bones.hasOwnProperty(key)) { continue; }
 		bone = DazMcp.findBone(fig, key);
@@ -22,10 +25,26 @@ function dazmcpTool(args) {
 			now = DazMcp.transformOf(bone).rotation;
 			rot = [now[0] + rot[0], now[1] + rot[1], now[2] + rot[2]];
 		}
+		ctl = [bone.getXRotControl(), bone.getYRotControl(), bone.getZRotControl()];
+		if (args.ignore_limits === true) {
+			for (a = 0; a < 3; a++) { try { ctl[a].setIsClamped(false); } catch (e) { /* no limits */ } }
+		}
 		DazMcp.setTransform(bone, null, rot, null);
-		set.push({ bone: bone.getName(), rotation: DazMcp.transformOf(bone).rotation });
+		got = DazMcp.transformOf(bone).rotation;
+		set.push({ bone: bone.getName(), rotation: got });
+		for (a = 0; a < 3; a++) {
+			if (Math.abs(got[a] - rot[a]) > 0.05) {
+				clamped.push({ bone: String(bone.getName()), axis: "XYZ".charAt(a), asked: rot[a], got: got[a],
+					limits: DazMcp.limitsOf(ctl[a]) });
+			}
+		}
 	}
 	var out = { figure: fig.getLabel(), set: set, not_found: notFound };
+	if (clamped.length) {
+		out.clamped = clamped;
+		out.limits_hint = "Daz held these dials at the joint limits. Stay inside the limits for a natural pose, " +
+			"bend the next joint in the chain instead, or pass ignore_limits=true if the pose really needs it.";
+	}
 	if (notFound.length) {
 		out.hint = "figure_info with all_bones=true lists the bone names of this figure.";
 	}

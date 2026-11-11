@@ -65,8 +65,9 @@ them), not `content_load`.
 - `label=` renames a node. Give figures clear names ("Ana", "Leo") right after
   loading; a second Genesis 9 arrives as "Genesis 9 (2)".
 - `node_delete` removes nodes, and the clothing fitted to a figure with it.
-- Props like chairs: a seated figure needs a sitting pose and its hip placed
-  over the seat; check from the side with `camera_set(yaw=90)` and a capture.
+- Props like chairs, sofas and beds: pose the figure, then `place_on(figure,
+  prop)` puts it on the seat or mattress, and `fit_check` reports what floats or
+  passes through. See the `furniture-poses` skill.
 
 ## Cameras
 

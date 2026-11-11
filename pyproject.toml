@@ -45,5 +45,16 @@ packages = ["src/daz3d_mcp"]
 [tool.hatch.build.targets.sdist]
 include = ["src", "scripts", "skills", "animations", "tests", "README.md", "LICENSE"]
 
+# uv/uvx reuse a cached build of a local checkout until one of these files changes. By default only
+# pyproject.toml counts, so `uvx --from <checkout>` kept serving old tools after code changes.
+[tool.uv]
+cache-keys = [
+  { file = "pyproject.toml" },
+  { file = "src/**/*.py" },
+  { file = "scripts/**/*" },
+  { file = "skills/**/*" },
+  { file = "animations/**/*" },
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,0 +1,242 @@
+// Tool: place_on
+// Puts a posed figure on a surface of a prop: its hips on a seat, its back on
+// a bed, its feet on a step. It turns the figure to face out of a seat, moves
+// it so the contact part lands on the surface, and checks the result.
+// It does not pose: pose the figure first (sitting, lying...).
+//
+// args:
+//   figure    (string, required) label
+//   prop      (string, required) label of the chair, sofa, bed...
+//   contact   (string, default "seat") seat | feet | back | front | left_side | right_side
+//   surface   (number) index from prop_surfaces; default: picked for the contact
+//   facing    (number | "auto" | "keep", default "auto") yaw in degrees; "auto"
+//             faces away from a seat's back (seat contact only)
+//   at        ([x, z]) world point for the contact; default: the surface center
+//             (a seat: centered across it and slid back to the backrest)
+//   back_gap  (number, default 1) seat: cm between the backrest and the back of
+//             the body (without a backrest: the hips go 12 cm in from the back edge)
+//   sink      (number, default 0.5) cm the contact sinks into a soft surface
+//   check     (bool, default true) run fit_check against the prop afterwards
+
+var PLACE_PARTS = {
+	seat: ["pelvis", "left_thigh", "right_thigh"],
+	feet: ["left_foot", "right_foot"],
+	back: ["pelvis", "abdomen", "chest", "neck", "head", "left_shoulder", "right_shoulder"],
+	front: ["pelvis", "abdomen", "chest", "neck", "head", "left_thigh", "right_thigh"],
+	left_side: ["pelvis", "abdomen", "chest", "head", "left_shoulder", "left_upperarm", "left_thigh", "left_shin"],
+	right_side: ["pelvis", "abdomen", "chest", "head", "right_shoulder", "right_upperarm", "right_thigh", "right_shin"]
+};
+
+function placeMove(fig, d) {
+	var parent = fig.getNodeParent();
+	var s = 1;
+	if (parent) { try { s = parent.getScaleControl().getValue(); } catch (e) { s = 1; } }
+	fig.getXPosControl().setValue(fig.getXPosControl().getValue() + d[0] / s);
+	fig.getYPosControl().setValue(fig.getYPosControl().getValue() + d[1] / s);
+	fig.getZPosControl().setValue(fig.getZPosControl().getValue() + d[2] / s);
+}
+
+function placePick(found, contact, floorY) {
+	var list = found.surfaces, i, h, best = -1;
+	if (!list.length) { return -1; }
+	if (contact !== "seat") { return 0; }
+	for (i = 0; i < list.length; i++) {
+		h = list[i].y - floorY;
+		if (h < 20 || h > 95) { continue; }
+		if (best < 0 || (list[i].front && !list[best].front)) { best = i; }
+		if (list[best].front) { break; }
+	}
+	return best;
+}
+
+// The front face of a seat's backrest, as a distance along s.front from the
+// seat center (negative: behind it), or null when the seat has no backrest.
+function placeBackrest(tris, s) {
+	var L = [s.front[2], -s.front[0]];
+	var half = placeHalfWidth(tris, s, L) * 0.6;
+	var best = null, i, o, k, x, z, f, ylo, yhi, llo, lhi, fmax, l;
+	// triangles that reach into the band above the seat and across its middle
+	for (i = 0; i < tris.count; i++) {
+		o = i * 9;
+		ylo = Math.min(tris.p[o + 1], tris.p[o + 4], tris.p[o + 7]);
+		yhi = Math.max(tris.p[o + 1], tris.p[o + 4], tris.p[o + 7]);
+		if (yhi < s.y_max + 8 || ylo > s.y + 55) { continue; }
+		llo = 1e30; lhi = -1e30; fmax = -1e30;
+		for (k = 0; k < 3; k++) {
+			x = tris.p[o + k * 3] - s.center[0];
+			z = tris.p[o + k * 3 + 2] - s.center[2];
+			l = x * L[0] + z * L[1];
+			f = x * s.front[0] + z * s.front[2];
+			if (l < llo) { llo = l; }
+			if (l > lhi) { lhi = l; }
+			if (f > fmax) { fmax = f; }
+		}
+		if (lhi < -half || llo > half || fmax > 0) { continue; }
+		if (best === null || fmax > best) { best = fmax; }
+	}
+	return best;
+}
+
+function placeHalfWidth(tris, s, L) {
+	var lo = 1e30, hi = -1e30, i, o, k, l;
+	for (i = 0; i < s.tris.length; i++) {
+		o = s.tris[i] * 9;
+		for (k = 0; k < 3; k++) {
+			l = (tris.p[o + k * 3] - s.center[0]) * L[0] + (tris.p[o + k * 3 + 2] - s.center[2]) * L[1];
+			if (l < lo) { lo = l; }
+			if (l > hi) { hi = l; }
+		}
+	}
+	return Math.max(Math.abs(lo), Math.abs(hi));
+}
+
+// Moves the figure up or down so its lowest point over the surface touches it
+// (minus sink). Returns the move.
+function placeDrop(fig, grid, parts, sink, contact) {
+	var pts = DazMcp.bodySamples(fig, { max: 15000, parts: parts });
+	var best = null, i, k, p, hits, gap, d;
+	for (i = 0; i < pts.x.length; i++) {
+		p = [pts.x[i], pts.y[i], pts.z[i]];
+		hits = DazMcp.gridHits(grid, p);
+		for (k = 0; k < hits.length; k++) {
+			gap = p[1] - hits[k].t;
+			if (best === null || gap < best) { best = gap; }
+		}
+	}
+	if (best === null) {
+		throw DazMcp.fail("not_over_surface", "No " + contact + " point of " + fig.getLabel() +
+			" is over the surface after moving it. Pose the figure first, or pass `at`.");
+	}
+	d = -best - sink;
+	placeMove(fig, [0, d, 0]);
+	return d;
+}
+
+// The farthest-back point of hips, back and thighs at backrest height.
+function placeRearmost(fig, s, L) {
+	var pts = DazMcp.bodySamples(fig, { max: 15000, parts: { pelvis: true, abdomen: true, chest: true,
+		left_thigh: true, right_thigh: true } });
+	var best = null, i, x, z, f;
+	for (i = 0; i < pts.x.length; i++) {
+		if (pts.y[i] < s.y_max + 8 || pts.y[i] > s.y + 55) { continue; }
+		x = pts.x[i] - s.center[0];
+		z = pts.z[i] - s.center[2];
+		f = x * s.front[0] + z * s.front[2];
+		if (best === null || f < best) { best = f; }
+	}
+	return best;
+}
+
+function dazmcpTool(args) {
+	var fig = DazMcp.requireFigure(args.figure);
+	if (DazMcp.nodeType(fig) === "fitted_figure") { fig = fig.getFollowTarget(); }
+	var prop = DazMcp.requireNode(args.prop, "prop");
+	var contact = args.contact || "seat";
+	var names = PLACE_PARTS[contact];
+	var r = DazMcp.round;
+	var i, k, s, yaw, parts, pts, minY, sx, sz, n, grid;
+	if (!names) { throw DazMcp.fail("bad_args", "contact must be one of: seat, feet, back, front, left_side, right_side."); }
+	parts = {};
+	for (i = 0; i < names.length; i++) { parts[names[i]] = true; }
+
+	var found = DazMcp.supportSurfaces(prop, {});
+	var pbox = DazMcp.bboxOf([prop]);
+	var index = (args.surface === undefined || args.surface === null)
+		? placePick(found, contact, pbox ? pbox.min[1] : 0) : args.surface;
+	if (index < 0 || index >= found.surfaces.length) {
+		throw DazMcp.fail("no_surface", "No surface to put the figure on" +
+			(found.surfaces.length ? " (index " + index + " of " + found.surfaces.length + ")" : "") + ".",
+			{ surfaces: found.surfaces.slice(0, 8).map(function (x, j) { return DazMcp.surfaceOut(x, j); }) });
+	}
+	s = found.surfaces[index];
+
+	// 1. turn
+	if (typeof args.facing === "number") { yaw = args.facing; }
+	else if (args.facing !== "keep" && contact === "seat" && s.front) { yaw = Math.atan2(s.front[0], s.front[2]) * 180 / Math.PI; }
+	if (yaw !== undefined) { fig.getYRotControl().setValue(yaw); }
+
+	// 2. slide over the target, then 3. drop or lift onto the surface; twice,
+	// because each step changes what the other one sees
+	var stris = { p: [], n: [], area: [], count: 0 };
+	for (i = 0; i < s.tris.length; i++) {
+		k = s.tris[i];
+		stris.p.push.apply(stris.p, found.tris.p.slice(k * 9, k * 9 + 9));
+		stris.n.push.apply(stris.n, found.tris.n.slice(k * 3, k * 3 + 3));
+		stris.area.push(found.tris.area[k]);
+		stris.count++;
+	}
+	grid = DazMcp.triGrid(stris, 1, 4);
+	var sink = args.sink === undefined || args.sink === null ? 0.5 : args.sink;
+	var gapBack = args.back_gap === undefined || args.back_gap === null ? 1 : args.back_gap;
+	var useBack = contact === "seat" && s.front && !(args.at && args.at.length === 2);
+	var backFace = useBack ? placeBackrest(found.tris, s) : null;
+	var moved = [0, 0, 0];
+	// a seat carries the hips; a soft cushion gives under the thighs
+	var dropParts = contact === "seat" ? { pelvis: true } : parts;
+	var round, delta, lat, fwd, rear, L;
+	for (round = 0; round < 2; round++) {
+		pts = DazMcp.bodySamples(fig, { max: 15000, parts: contact === "seat" ? { pelvis: true } : parts });
+		if (!pts.x.length) { throw DazMcp.fail("no_geometry", "Found no " + names.join("/") + " points on " + fig.getLabel() + "."); }
+		minY = 1e30;
+		for (i = 0; i < pts.y.length; i++) { if (pts.y[i] < minY) { minY = pts.y[i]; } }
+		sx = 0; sz = 0; n = 0;
+		for (i = 0; i < pts.y.length; i++) { if (pts.y[i] <= minY + 3) { sx += pts.x[i]; sz += pts.z[i]; n++; } }
+		sx /= n; sz /= n;
+		if (args.at && args.at.length === 2) { delta = [args.at[0] - sx, args.at[1] - sz]; }
+		else if (useBack) {
+			// center the hips across the seat; slide along the seat until the
+			// back of the body is gapBack cm from the backrest (or, without a
+			// backrest, the hips are 12 cm in from the back edge)
+			L = [s.front[2], -s.front[0]];
+			lat = (sx - s.center[0]) * L[0] + (sz - s.center[2]) * L[1];
+			if (backFace !== null) {
+				rear = placeRearmost(fig, s, L);
+				fwd = rear === null ? 0 : (backFace + gapBack) - rear;
+			} else {
+				fwd = (-s.back_reach + 12) - ((sx - s.center[0]) * s.front[0] + (sz - s.center[2]) * s.front[2]);
+			}
+			delta = [-lat * L[0] + fwd * s.front[0], -lat * L[1] + fwd * s.front[2]];
+		} else { delta = [s.center[0] - sx, s.center[2] - sz]; }
+		placeMove(fig, [delta[0], 0, delta[1]]);
+		moved[0] += delta[0];
+		moved[2] += delta[1];
+
+		moved[1] += placeDrop(fig, grid, dropParts, sink, contact);
+	}
+
+	// Knees and shins must clear the front of a seat: slide forward (away
+	// from the backrest) until they do.
+	var fit = null, push, name;
+	if (contact === "seat" && s.front) {
+		for (round = 0; round < 3; round++) {
+			fit = DazMcp.fitCheck(fig, [prop], {});
+			push = 0;
+			for (name in fit.parts) {
+				if (fit.parts.hasOwnProperty(name) && /shin|foot/.test(name) && fit.parts[name].way_out === "forward") {
+					push = Math.max(push, fit.parts[name].max_depth_cm + 0.5);
+				}
+			}
+			if (!push) { break; }
+			placeMove(fig, [s.front[0] * push, 0, s.front[2] * push]);
+			moved[0] += s.front[0] * push;
+			moved[2] += s.front[2] * push;
+			moved[1] += placeDrop(fig, grid, dropParts, sink, contact);
+			fit = null;
+		}
+	}
+
+	var out = {
+		figure: fig.getLabel(),
+		prop: prop.getLabel(),
+		contact: contact,
+		surface: DazMcp.surfaceOut(s, index),
+		moved_by: [r(moved[0], 2), r(moved[1], 2), r(moved[2], 2)],
+		transform: DazMcp.transformOf(fig)
+	};
+	if (useBack && backFace !== null) {
+		rear = placeRearmost(fig, s, [s.front[2], -s.front[0]]);
+		if (rear !== null) { out.gap_to_backrest_cm = r(rear - backFace, 1); }
+	}
+	if (args.check !== false) { out.fit = fit || DazMcp.fitCheck(fig, [prop], {}); }
+	return out;
+}

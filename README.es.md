@@ -86,7 +86,10 @@ script. Es más lento pero no necesita compilar nada.
 | `node_delete` | Borra nodos (y lo que lleva puesto una figura) |
 | `figure_info` | Generación, altura, ropa, morphs en uso, huesos posados y superficies de una figura |
 | `morph_list` / `morph_set` | Busca y ajusta diales de forma |
-| `pose_bones` / `pose_reset` | Rota huesos / vuelve a la pose por defecto |
+| `pose_bones` / `pose_reset` | Rota huesos (avisa de los que topan con su límite) / vuelve a la pose por defecto |
+| `prop_surfaces` | Mide dónde se puede sentar, acostar o parar una figura sobre un mueble: altura, tamaño, hacia dónde mira un asiento |
+| `place_on` | Pone una figura ya posada sobre un asiento, cama o escalón: mirando al frente, contra el respaldo, la cadera sobre el cojín |
+| `fit_check` | Por parte del cuerpo: cuánto se mete en un mueble (y por dónde sale) o cuánto flota |
 | `wearable_fit` | Ajusta ropa o pelo a una figura, o lo desajusta |
 | `package_inspect` / `package_install` | Revisa un .zip de otra tienda e instala su contenido en una biblioteca |
 | `package_list` / `package_uninstall` | Lista los paquetes instalados / borra exactamente los archivos que instaló uno |
@@ -113,7 +116,7 @@ script. Es más lento pero no necesita compilar nada.
 | `run_script` | Ejecuta DazScript para todo lo demás (se puede desactivar) |
 | `daz_guide` | Devuelve las skills como texto para agentes sin soporte de skills |
 
-Skills: `daz-basics`, `scene-building`, `characters`, `rendering`, `third-party-assets`, `animation`.
+Skills: `daz-basics`, `scene-building`, `characters`, `furniture-poses`, `rendering`, `third-party-assets`, `animation`.
 
 Pruébalo: *"Abre ~/Documents/escena.duf en Daz, describe la escena y muéstrame una captura."*
 O: *"Monta una escena con dos personajes Genesis 9, vestidos y posados,
