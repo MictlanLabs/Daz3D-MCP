@@ -85,7 +85,8 @@ def kind_of(relative: str, asset_type: str | None) -> str:
     kind = KIND_BY_TYPE.get(asset_type or "")
     if asset_type and asset_type.startswith("preset_") and kind is None:
         kind = "preset"
-    if kind == "pose" and ("/animation" in rel or "/animations/" in rel or "/aniblocks/" in rel):
+    # Animations for Genesis 9 are often saved as property presets (keys on every dial).
+    if kind in ("pose", "properties") and ("/animation" in rel or "/animations/" in rel or "/aniblocks/" in rel):
         kind = "animation"  # animated pose presets live in Animation(s) folders
     if kind is None:
         # No or unknown header: guess from the folder names.
@@ -113,8 +114,17 @@ def kind_of(relative: str, asset_type: str | None) -> str:
         kind = "hair"
     if kind == "clothing" and "/hair/" in rel:
         kind = "hair"
+    # Real Genesis 9 content saves anatomy (eyes, mouth) and hand props as wearables.
+    if kind == "clothing" and "/props/" in rel:
+        kind = "prop"
+    if kind == "clothing" and "/anatomy/" in rel:
+        kind = "other"
     if kind == "scene_subset" and "light" in rel:
         kind = "light"
+    # Real Daz content saves base figure loaders (People/Genesis 9/Genesis 9.duf)
+    # with type "character"; files right inside People/<figure>/ are the figures.
+    if kind == "character" and re.fullmatch(r"/people/[^/]+/[^/]+\.duf", rel):
+        kind = "figure"
     return kind
 
 

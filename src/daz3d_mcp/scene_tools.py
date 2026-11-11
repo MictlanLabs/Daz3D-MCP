@@ -60,6 +60,12 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient]) -> C
     def forget() -> None:
         state["libraries"] = None
         state["index"] = None
+        # The saved index would still be "fresh" (under 24 h) and hide files a
+        # package just installed, so drop it and rebuild on the next search.
+        try:
+            (config_dir() / "content-index.json").unlink()
+        except OSError:
+            pass
 
     async def libraries(refresh: bool = False) -> list[str]:
         if state["libraries"] is None or refresh:

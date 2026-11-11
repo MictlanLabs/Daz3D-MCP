@@ -38,7 +38,8 @@ function dazmcpTool(args) {
 		values = [controls[0].getValue(), controls[1].getValue(), controls[2].getValue()];
 		posed = Math.abs(values[0]) > 0.01 || Math.abs(values[1]) > 0.01 || Math.abs(values[2]) > 0.01;
 		hip = root && DazMcp.same(b, root);
-		var animated = DazMcp.numKeys(controls[0]) || DazMcp.numKeys(controls[1]) || DazMcp.numKeys(controls[2]);
+		var animated = DazMcp.isAnimated(controls[0]) || DazMcp.isAnimated(controls[1]) ||
+			DazMcp.isAnimated(controls[2]);
 		if (!(args.all_bones === true || posed || hip || animated)) { continue; }
 		keyControls(controls);
 		if (hip) { keyControls(DazMcp.transformControls(b, "position")); }

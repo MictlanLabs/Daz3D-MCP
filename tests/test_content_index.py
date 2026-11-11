@@ -29,6 +29,12 @@ def test_kinds_and_generations():
     assert kind_of("People/Genesis 9/Poses/Walk.duf", None) == "pose"
     assert kind_of("Light Presets/Studio/Three Point.duf", "scene_subset") == "light"
     assert kind_of("Something/Odd.duf", "preset_dforce") == "preset"
+    # As saved by real Genesis 9 Starter Essentials:
+    assert kind_of("People/Genesis 9/Genesis 9.duf", "character") == "figure"
+    assert kind_of("People/Genesis 9/Animations/Store/Walk For G9 Female.duf", "preset_properties") == "animation"
+    assert kind_of("People/Genesis 9/Characters/Kat for Genesis 9.duf", "character") == "character"
+    assert kind_of("People/Genesis 9/Anatomy/Daz Originals/Base Anatomy/Genesis 9 Eyes.duf", "wearable") == "other"
+    assert kind_of("People/Genesis 9/Props/Daz Originals/Tubal Shield/Tubal Shield Base LT.duf", "wearable") == "prop"
     assert generation_of("People/Genesis 8 Female/Clothing/x.duf") == "Genesis 8"
     assert generation_of("People/Genesis 8.1 Male/x.duf") == "Genesis 8.1"
     assert generation_of("Runtime/G9 Outfit/x.duf") == "Genesis 9"

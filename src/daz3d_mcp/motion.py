@@ -617,7 +617,14 @@ def read_fbx(path: Path, take: str | None = None) -> SourceMotion:
             if chosen is None:
                 raise MotionError(f"{path.name} has no take {take!r}; it has {', '.join(take_names)}.")
         else:
-            chosen = next(iter(stacks))
+            # Real Mixamo files can carry an empty "Take 001" before "mixamo.com":
+            # take the stack that animates the most channels.
+            used: dict[int, int] = {sid: 0 for sid in stacks}
+            for cn in curve_nodes.values():
+                sid = layer_stack.get(cn["layer"]) if cn["layer"] is not None else None
+                if sid in used and cn["model"] is not None and cn["curves"]:
+                    used[sid] += 1
+            chosen = max(stacks, key=lambda sid: used[sid])
     for cn in curve_nodes.values():
         if cn["model"] is None:
             continue

@@ -23,7 +23,7 @@ STAGE3_TOOLS = {"package_inspect", "package_install", "package_list", "package_u
 
 
 def _params(daz_home, home) -> StdioServerParameters:
-    env = dict(os.environ, DAZ3D_MCP_HOME=str(daz_home), DAZ3D_MCP_TRANSPORT="http", HOME=str(home))
+    env = dict(os.environ, DAZ3D_MCP_HOME=str(daz_home), DAZ3D_MCP_TRANSPORT="http", HOME=str(home), USERPROFILE=str(home))
     return StdioServerParameters(command=sys.executable, args=["-m", "daz3d_mcp"], env=env)
 
 
@@ -66,7 +66,7 @@ def test_agent_uses_an_external_zip_and_a_loose_fbx(bridge, daz_home, content_li
                 assert jacket["path"] == (library / JACKET).as_posix()
 
                 libs = await tool("content_libraries")
-                assert library.as_posix() in libs["libraries"]
+                assert library.as_posix() in [p.replace("\\", "/") for p in libs["libraries"]]
                 found = (await tool("content_search", query="leather jacket", kind="clothing",
                                     generation="Genesis 9"))["results"]
                 assert [f["path"] for f in found] == [jacket["path"]]
