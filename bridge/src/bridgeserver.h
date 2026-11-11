@@ -7,11 +7,17 @@
 
 #include <QtCore/QByteArray>
 #include <QtCore/QHash>
+#include <QtCore/QJsonArray>
+#include <QtCore/QJsonObject>
+#include <QtCore/QList>
 #include <QtCore/QObject>
+#include <QtCore/QPointer>
 #include <QtCore/QString>
 #include <QtNetwork/QTcpServer>
 
 class QTcpSocket;
+class QTimer;
+class QWidget;
 
 class DazMcpBridgeServer : public QObject
 {
@@ -34,6 +40,9 @@ private slots:
 	void onNewConnection();
 	void onReadyRead();
 	void onDisconnected();
+	// Runs while a script executes (also inside a modal dialog's own event
+	// loop) and answers dialogs that match the request's rules.
+	void scanDialogs();
 
 private:
 	struct Request
@@ -52,6 +61,10 @@ private:
 	bool isAuthorized(const Request &req) const;
 	bool isLocalHost(const Request &req) const;
 
+	// Modal dialogs (see docs/protocol.md, "Dialogs").
+	QByteArray listDialogs() const;
+	QByteArray answerDialog(const QByteArray &body, int &status);
+
 	bool loadOrCreateToken();
 	bool writeDiscoveryFile() const;
 	void removeDiscoveryFile() const;
@@ -61,4 +74,9 @@ private:
 	QByteArray m_token;
 	QString m_lastError;
 	bool m_busy;
+
+	QTimer *m_dialogTimer;
+	QJsonArray m_dialogRules;           // rules of the running request
+	QJsonArray m_dialogLog;             // dialogs seen during the running request
+	QList<QPointer<QWidget>> m_seenDialogs;
 };

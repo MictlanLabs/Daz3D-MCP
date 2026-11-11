@@ -50,7 +50,8 @@ def test_status_and_execute(plugin, daz_home):
     assert status["ok"] and status["protocol"] == 1
     out = t.execute("function f(){}", {"a": 1}, 10)
     assert out == {"ok": True, "result": {"func": "dazmcp_entry", "args": {"a": 1}}}
-    assert (daz_home / "token").stat().st_mode & 0o077 == 0
+    if os.name != "nt":  # Windows has no POSIX permission bits
+        assert (daz_home / "token").stat().st_mode & 0o077 == 0
 
 
 def test_script_error_shape(plugin):
@@ -81,3 +82,42 @@ def test_discovery_file_removed_on_quit(plugin, daz_home):
         with pytest.raises(DazError) as err:
             HttpTransport().status()
         assert err.value.code == "bridge_unreachable"
+
+
+def test_dialog_is_reported_and_answered(plugin):
+    # The stub opens a modal "overwrite?" box when the code says SHOW_DIALOG,
+    # like a Daz call that asks the user.
+    t = HttpTransport()
+    assert t.supports_dialogs()
+    with pytest.raises(DazError) as err:
+        t.execute("SHOW_DIALOG", {}, 30)
+    assert err.value.code == "dialog_open"
+    dialog = err.value.details["dialogs"][0]
+    assert dialog["title"] == "File Already Exists"
+    assert "already exists" in dialog["text"] and "<b>" not in dialog["text"]
+    assert {"Yes", "No"} <= set(dialog["buttons"])
+    assert dialog["options"][0]["label"] == "Don't ask again"
+    listing = t.dialogs()
+    assert listing["busy"] and listing["waiting_call"] and listing["dialogs"][0]["id"] == dialog["id"]
+    # Another call while the first one waits says why it cannot run.
+    with pytest.raises(DazError) as again:
+        t.execute("function f(){}", {}, 5)
+    assert again.value.code == "dialog_open"
+    with pytest.raises(DazError) as wrong:
+        t.answer_dialog("Maybe")
+    assert wrong.value.code == "no_button"
+    out = t.answer_dialog("yes", check=["Don't ask again"], wait=10)
+    assert out["answered"]["answered"] == "Yes"
+    assert out["response"]["result"] == {"answer": "yes", "again": True}
+    assert out["response"]["dialogs"][0]["answered_by"] == "agent"
+    assert t.execute("function f(){}", {"a": 1}, 10)["ok"]
+
+
+def test_dialog_rule_answers_without_agent(plugin):
+    t = HttpTransport()
+    out = t.execute("SHOW_DIALOG", {}, 30, [{"match": "already exists", "button": "No"}])
+    assert out["result"] == {"answer": "no", "again": False}
+    assert out["dialogs"][0]["answered"] == "No" and out["dialogs"][0]["answered_by"] == "rule"
+    with pytest.raises(DazError) as err:
+        t.answer_dialog("Yes")
+    assert err.value.code == "no_dialog"

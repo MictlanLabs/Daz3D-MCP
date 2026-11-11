@@ -31,8 +31,16 @@ If `daz_status` fails, tell the user to open Daz Studio and run
   `C:/Users/Ana/scene.duf` both work.
 - One request runs at a time. Opening a heavy scene can take minutes and Daz
   Studio is frozen meanwhile; wait for the answer instead of sending more calls.
-- Daz may show a dialog (missing files, licences). If a call times out, ask the
-  user to look at the Daz Studio window.
+- Daz may stop on a pop-up dialog (overwrite?, replace or add?, preset outside
+  the limits, missing files). With the bridge plugin 0.2+ the call fails with
+  `dialog_open` and lists the dialog's title, text and buttons: answer it with
+  `daz_dialog(button="...")` (`check=[...]` ticks boxes first, `"escape"`
+  cancels) and the stopped call's result comes back as `call_result`. A tool
+  that does several steps in Python (render_shots, render_animation) does not
+  continue: call it again (with `resume=true`). Ask the user before an answer
+  that overwrites or discards their work. `daz_dialog()` with no button lists
+  open dialogs. Without the plugin (no-plugin mode) dialogs are invisible: if
+  a call times out, ask the user to look at the Daz Studio window.
 
 ## How a scene is organized
 
@@ -112,6 +120,8 @@ Rules that avoid most errors:
   `getYRotControl()`, `getScaleControl()`; call `.setValue(x)` on them. Values
   are in centimeters and degrees.
 - Never open dialogs (`MessageBox`, file pickers): nobody is there to click.
+  Do not call `App.startPromptSuppression()`: in Daz Studio 6.26 a prompt
+  shown while it is on closes Daz Studio.
 - Keep each script small and check the result with `scene_info` or a capture.
 - Prefer the named tools whenever one exists; `run_script` may be disabled by
   the user (`allow_run_script` in `~/.daz3d-mcp/settings.json`).

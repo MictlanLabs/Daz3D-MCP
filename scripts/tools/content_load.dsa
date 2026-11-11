@@ -50,24 +50,8 @@ function dazmcpTool(args) {
 
 	var before = snapshot();
 	DazMcp.selectOnly(target);
-	// Daz Studio 6 asks "Character Load Options" (new figure or apply to the
-	// selected one) when a character preset loads with a figure selected. That
-	// modal dialog blocks the script, so answer it through the same settings
-	// the dialog saves, and put the user's own choice back afterwards.
-	var prefs = new DzAppSettings();
-	var oldShow = prefs.getStringValue("DSONCharacterShowLoadDlg", "");
-	var oldAsPreset = prefs.getStringValue("DSONCharacterLoadAsPreset", "");
-	prefs.setStringValue("DSONCharacterShowLoadDlg", "false");
-	prefs.setStringValue("DSONCharacterLoadAsPreset", target ? "true" : "false");
-	var ok;
-	try {
-		ok = App.getContentMgr().openFile(path, true);
-	} finally {
-		if (oldShow === "") { prefs.removeValue("DSONCharacterShowLoadDlg"); }
-		else { prefs.setStringValue("DSONCharacterShowLoadDlg", oldShow); }
-		if (oldAsPreset === "") { prefs.removeValue("DSONCharacterLoadAsPreset"); }
-		else { prefs.setStringValue("DSONCharacterLoadAsPreset", oldAsPreset); }
-	}
+	// Answers "Character Load Options" in advance (see DazMcp.openContent).
+	var ok = DazMcp.openContent(path, !!target);
 	if (ok === false) {
 		throw DazMcp.fail("load_failed", "Daz Studio could not load " + path + ".", { path: path });
 	}

@@ -6,6 +6,8 @@
 //   preview_path (string) where to also save a small preview
 //   preview_size (int, default 1024)
 //   camera       (string) camera label; default: the active viewport camera
+//   overwrite    (bool, default false) replace an existing out_path. Daz would
+//                otherwise stop on an "overwrite?" dialog.
 //   frame        (int) timeline frame to render; default: the current frame.
 //                The scene goes back to the frame it was on afterwards.
 //   width, height, max_samples, max_time, quality: as in render_settings
@@ -16,6 +18,8 @@ function dazmcpTool(args) {
 	var dir = new DzFileInfo(outPath).path();
 	if (!new DzDir(dir).exists()) { throw DazMcp.fail("not_found", "Folder does not exist: " + dir); }
 
+	// Checked before anything changes, and removed only right before rendering.
+	if (DazMcp.fileExists(outPath) && args.overwrite !== true) { DazMcp.clearTarget(outPath, false); }
 	var settings = DazMcp.applyRenderSettings(args);
 	var v3d = DazMcp.viewport3d();
 	var previous = v3d ? v3d.getCamera() : null;
@@ -37,6 +41,7 @@ function dazmcpTool(args) {
 	try { opts.setRenderImgFilename(outPath); } catch (e2) { opts.renderImgFilename = outPath; }
 	try { opts.setIsCurrentFrameRender(true); } catch (e3) { /* single frame is the default */ }
 
+	DazMcp.clearTarget(outPath, true);
 	var started = new Date().getTime();
 	var ok = mgr.doRender(opts);
 	var seconds = (new Date().getTime() - started) / 1000;

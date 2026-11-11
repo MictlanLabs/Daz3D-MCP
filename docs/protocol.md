@@ -54,6 +54,43 @@ answers `{"ok": false, "error": {"code": "script_error", "message": "...", "line
 While a request runs, another one gets `409` with code `busy`. Bodies are
 limited to 64 MB.
 
+## Dialogs (bridge 0.2+, `"features": ["dialogs"]` in status)
+
+Some Daz calls ask the user with a modal dialog and the script waits until a
+button is pressed. The dialog runs its own event loop, so the bridge keeps
+answering `/v1/status` and the two calls below while `/v1/execute` waits.
+
+`POST /v1/execute` may carry rules answered without the agent:
+
+```json
+{"code": "...", "args": "{}", "dialogs": [{"match": "already exists", "button": "Yes", "check": ["Don't ask again"]}]}
+```
+
+`match` is a case-insensitive regex over the dialog's title and text. Dialogs
+already open when the request starts are never answered by rule. Dialogs seen
+during the request are added to its response:
+`"dialogs": [{"id", "title", "text", "buttons", "options", "answered", "answered_by": "rule" | "agent"}]`.
+
+`GET /v1/dialogs` lists open modal windows (the active one first):
+
+```json
+{"ok": true, "result": {"busy": true, "dialogs": [{"id": "1f2e3d4c", "title": "File Already Exists",
+  "class": "QMessageBox", "text": "The file ... Do you want to overwrite it?", "buttons": ["Yes", "No"],
+  "options": [{"label": "Don't ask again", "kind": "checkbox", "checked": false}]}], "seen": []}}
+```
+
+Progress windows have `"progress": true` and need no answer.
+
+`POST /v1/dialogs/answer` with `{"button": "Yes", "check": [...], "uncheck": [...], "id": "optional"}`
+sets the options, then presses the button (case and `&` ignored; a unique
+prefix also works; `"escape"` rejects the dialog). The press happens after the
+answer is sent. Errors: `404 no_dialog`, `400 no_button` / `no_option` (the
+message lists what exists).
+
+The MCP polls `/v1/dialogs` while a request runs. A dialog open for more than
+a second makes the tool fail with `dialog_open`; the request stays pending and
+`daz_dialog` answers it and returns its result.
+
 ## Programs
 
 The MCP server builds each program as `scripts/lib/core.dsa` + one

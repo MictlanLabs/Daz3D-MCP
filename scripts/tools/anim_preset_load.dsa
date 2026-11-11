@@ -15,8 +15,8 @@ function dazmcpTool(args) {
 	var before = DazMcp.keyRange(DazMcp.channels(fig, { animated: true }));
 	Scene.setTime(DazMcp.frameTime(args.frame || 0));
 	DazMcp.selectOnly(fig);
-	var ok = App.getContentMgr().openFile(args.path, true);
-	Scene.setTime(keep);
+	var ok;
+	try { ok = DazMcp.openContent(args.path, true); } finally { Scene.setTime(keep); }
 	if (ok === false) { throw DazMcp.fail("load_failed", "Daz Studio could not load " + args.path + "."); }
 	var ch = DazMcp.channels(fig, { animated: true });
 	var kr = DazMcp.keyRange(ch);

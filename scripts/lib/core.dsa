@@ -1736,3 +1736,43 @@ DazMcp.fitCheck = function (fig, against, opts) {
 	report.hints = hints;
 	return report;
 };
+
+// ======================================================== modal dialogs ==
+// A modal dialog stops the script until someone clicks it, and the agent
+// cannot see it. These helpers answer the known ones in advance.
+
+// Loads a content file with ContentMgr.openFile (merge). Daz Studio 6 asks
+// "Character Load Options" (new figure or apply to the selected one) when a
+// character preset loads with a figure selected; answer it through the same
+// settings the dialog saves, and put the user's own choice back afterwards.
+// asPreset: true applies a character to the selected figure, false adds one.
+DazMcp.openContent = function (path, asPreset) {
+	var prefs = new DzAppSettings();
+	var oldShow = prefs.getStringValue("DSONCharacterShowLoadDlg", "");
+	var oldAsPreset = prefs.getStringValue("DSONCharacterLoadAsPreset", "");
+	prefs.setStringValue("DSONCharacterShowLoadDlg", "false");
+	prefs.setStringValue("DSONCharacterLoadAsPreset", asPreset ? "true" : "false");
+	try {
+		return App.getContentMgr().openFile(path, true);
+	} finally {
+		if (oldShow === "") { prefs.removeValue("DSONCharacterShowLoadDlg"); }
+		else { prefs.setStringValue("DSONCharacterShowLoadDlg", oldShow); }
+		if (oldAsPreset === "") { prefs.removeValue("DSONCharacterLoadAsPreset"); }
+		else { prefs.setStringValue("DSONCharacterLoadAsPreset", oldAsPreset); }
+	}
+};
+
+// Removes a file that is about to be written, so Daz does not ask "The file
+// already exists. Do you want to overwrite it?" (the render manager does).
+// Throws "exists" when overwrite is false.
+DazMcp.clearTarget = function (path, overwrite) {
+	if (!DazMcp.fileExists(path)) { return false; }
+	if (!overwrite) {
+		throw DazMcp.fail("exists", "A file already exists at " + path + ". Pass overwrite=true to replace it.");
+	}
+	var f = new DzFile(path);
+	if (!f.remove() && DazMcp.fileExists(path)) {
+		throw DazMcp.fail("exists", "Could not replace " + path + " (is it open in another program?).");
+	}
+	return true;
+};

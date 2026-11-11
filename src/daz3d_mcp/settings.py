@@ -38,6 +38,11 @@ class Settings:
     install_library: str | None = None
     # Largest package (unpacked) that package_install accepts, in GB.
     max_package_gb: float = 20.0
+    # Answers to Daz Studio dialogs given in advance, so a call does not stop on
+    # them (bridge plugin 0.2+). Each rule: {"match": regex over title and text,
+    # "button": label to press, "check": [check box labels]}.
+    # Example: [{"match": "outside the limits", "button": "Turn Limits Off"}]
+    dialog_rules: list = field(default_factory=list)
     extra: dict = field(default_factory=dict)
 
     @property

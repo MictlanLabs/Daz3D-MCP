@@ -16,6 +16,8 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -94,11 +96,60 @@ def _decode_response(raw: bytes) -> dict:
 class Transport:
     name = "base"
 
-    def execute(self, code: str, args: dict, timeout: float) -> dict:
+    def execute(self, code: str, args: dict, timeout: float, dialogs: list[dict] | None = None) -> dict:
         raise NotImplementedError
 
     def status(self) -> dict:
         raise NotImplementedError
+
+    def dialogs(self) -> dict:
+        raise DazError("not_supported", "Seeing Daz Studio dialogs needs the bridge plugin (0.2 or later).",
+                       "No-plugin mode cannot see dialogs; ask the user to click it.")
+
+    def answer_dialog(self, button: str | None = None, dialog_id: str | None = None,
+                      check: list[str] | None = None, uncheck: list[str] | None = None,
+                      wait: float = 600.0) -> dict:
+        return self.dialogs()
+
+    def wait_pending(self, wait: float) -> dict | None:
+        return None
+
+
+# Modal dialogs. A Daz call that asks the user something (overwrite? replace?)
+# stops the script until a button is pressed. Bridge 0.2+ lists open dialogs
+# and presses buttons, and keeps answering HTTP while a dialog is open.
+DIALOG_POLL = 0.5  # seconds between dialog checks while a request runs
+DIALOG_GRACE = 1.0  # a dialog must stay open this long before it is reported
+# The socket waits this much longer than the caller's timeout, so a request
+# stuck on a dialog can still deliver its result once the dialog is answered.
+SOCKET_SLACK = 3600.0
+
+
+def describe_dialogs(dialogs: list[dict]) -> str:
+    parts = []
+    for d in dialogs:
+        text = " ".join(str(d.get("text") or "").split())
+        line = f'"{d.get("title") or "(no title)"}"'
+        if text:
+            line += f": {text[:400]}"
+        if d.get("buttons"):
+            line += " Buttons: " + ", ".join(d["buttons"]) + "."
+        opts = d.get("options") or []
+        if opts:
+            line += " Options: " + ", ".join(
+                f'{o.get("label")} [{"x" if o.get("checked") else " "}]' for o in opts) + "."
+        parts.append(line)
+    return " | ".join(parts)
+
+
+def dialog_open_error(dialogs: list[dict]) -> DazError:
+    return DazError(
+        "dialog_open",
+        "Daz Studio stopped on a dialog and is waiting for an answer: " + describe_dialogs(dialogs),
+        "Answer it with daz_dialog(button=...) (or button='escape' to cancel); the waiting call's result "
+        "comes back then. Ask the user first when the answer would discard or overwrite their work.",
+        {"dialogs": dialogs},
+    )
 
 
 class HttpTransport(Transport):
@@ -106,6 +157,9 @@ class HttpTransport(Transport):
 
     def __init__(self, info: BridgeInfo | None = None):
         self._info = info
+        self._pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="daz-bridge")
+        self._pending: Future | None = None  # an execute still waiting on a dialog
+        self._features: set[str] | None = None
 
     def _bridge(self) -> BridgeInfo:
         info = self._info or read_bridge_info()
@@ -159,11 +213,111 @@ class HttpTransport(Transport):
                 f"Bridge protocol {proto} differs from MCP protocol {PROTOCOL_VERSION}; "
                 "update the plugin with `uvx daz3d-mcp setup`."
             )
+        self._features = set(data.get("features") or [])
         return data
 
-    def execute(self, code: str, args: dict, timeout: float) -> dict:
-        payload = {"code": code, "entry": ENTRY_FUNCTION, "args": json.dumps(args)}
-        return self._request("/v1/execute", payload, timeout=timeout)
+    # ------------------------------------------------------------ dialogs --
+    def supports_dialogs(self) -> bool:
+        if self._features is None:
+            try:
+                self.status()
+            except DazError:
+                return False
+        return "dialogs" in (self._features or set())
+
+    def dialogs(self) -> dict:
+        """Open dialogs, and whether a tool call is waiting on one."""
+        if not self.supports_dialogs():
+            raise DazError("not_supported", "Seeing Daz Studio dialogs needs the bridge plugin 0.2 or later.",
+                           "Update the plugin (`uvx daz3d-mcp setup`) and restart Daz Studio.")
+        data = self._request("/v1/dialogs", None, timeout=10).get("result") or {}
+        pending = self._pending is not None and not self._pending.done()
+        return {"dialogs": data.get("dialogs") or [], "busy": bool(data.get("busy")), "waiting_call": pending}
+
+    def _blocking_dialogs(self) -> list[dict]:
+        data = self._request("/v1/dialogs", None, timeout=5).get("result") or {}
+        return [d for d in data.get("dialogs") or [] if not d.get("progress")]
+
+    def answer_dialog(self, button: str | None = None, dialog_id: str | None = None,
+                      check: list[str] | None = None, uncheck: list[str] | None = None,
+                      wait: float = 600.0) -> dict:
+        """Presses a button (after setting check boxes). When a tool call was
+        waiting on the dialog, waits for it and returns its raw response."""
+        if not self.supports_dialogs():
+            raise DazError("not_supported", "Answering Daz Studio dialogs needs the bridge plugin 0.2 or later.",
+                           "Update the plugin (`uvx daz3d-mcp setup`) and restart Daz Studio, or ask the "
+                           "user to click the dialog.")
+        body: dict = {}
+        if button:
+            body["button"] = button
+        if dialog_id:
+            body["id"] = dialog_id
+        if check:
+            body["check"] = list(check)
+        if uncheck:
+            body["uncheck"] = list(uncheck)
+        answered = self._request("/v1/dialogs/answer", body, timeout=10).get("result")
+        out: dict = {"answered": answered}
+        fut = self._pending
+        if fut is not None and button:
+            out["response"] = self._wait(fut, wait)
+        return out
+
+    def wait_pending(self, wait: float) -> dict | None:
+        """Waits for a tool call that was left waiting; None when there is none."""
+        fut = self._pending
+        if fut is None:
+            return None
+        return self._wait(fut, wait)
+
+    def _wait(self, fut: Future, timeout: float) -> dict:
+        """Waits for an execute request, watching for dialogs that block it."""
+        self._pending = None
+        watch = self.supports_dialogs()
+        deadline = time.monotonic() + timeout
+        first_seen: dict[str, float] = {}
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                self._pending = fut
+                raise DazError("timeout", f"Daz Studio did not answer within {timeout:.0f} s.",
+                               "It is still working (or waiting on a dialog nobody can see). Call daz_dialog "
+                               "to look; it also collects the result once the call ends.")
+            try:
+                return fut.result(timeout=min(DIALOG_POLL, remaining) if watch else remaining)
+            except FutureTimeout:
+                pass
+            if not watch:
+                continue
+            try:
+                dialogs = self._blocking_dialogs()
+            except DazError:
+                continue
+            now = time.monotonic()
+            first_seen = {d["id"]: first_seen.get(d["id"], now) for d in dialogs if d.get("id")}
+            blocking = [d for d in dialogs if now - first_seen.get(d.get("id"), now) >= DIALOG_GRACE]
+            if blocking and not fut.done():
+                self._pending = fut
+                raise dialog_open_error(blocking)
+
+    def execute(self, code: str, args: dict, timeout: float, dialogs: list[dict] | None = None) -> dict:
+        fut = self._pending
+        if fut is not None:
+            if not fut.done():
+                try:
+                    blocking = self._blocking_dialogs() if self.supports_dialogs() else []
+                except DazError:
+                    blocking = []
+                if blocking:
+                    raise dialog_open_error(blocking)
+                raise DazError("busy", "Daz Studio is still running an earlier call.",
+                               "Call daz_dialog to wait for it (and see any dialog it stopped on).")
+            self._pending = None
+        payload: dict = {"code": code, "entry": ENTRY_FUNCTION, "args": json.dumps(args)}
+        if dialogs:
+            payload["dialogs"] = dialogs
+        fut = self._pool.submit(self._request, "/v1/execute", payload, timeout + SOCKET_SLACK)
+        return self._wait(fut, timeout)
 
 
 class FileTransport(Transport):
@@ -200,7 +354,7 @@ class FileTransport(Transport):
     def status(self) -> dict:
         return {"ok": True, "transport": "file", "executable": self._executable()}
 
-    def execute(self, code: str, args: dict, timeout: float) -> dict:
+    def execute(self, code: str, args: dict, timeout: float, dialogs: list[dict] | None = None) -> dict:
         exe = self._executable()
         queue = self._queue()
         req_id = uuid.uuid4().hex
@@ -259,11 +413,16 @@ class AutoTransport(Transport):
 
     def __init__(self, daz_executable: str | None):
         self._file = FileTransport(daz_executable)
+        self._http: HttpTransport | None = None
 
     def _pick(self) -> Transport:
         info = read_bridge_info()
         if info is not None:
-            return HttpTransport(info)
+            # Keep one HttpTransport per running bridge: it remembers a call
+            # that is waiting on a dialog.
+            if self._http is None or self._http._info != info:
+                self._http = HttpTransport(info)
+            return self._http
         if os.environ.get("DAZ3D_MCP_NO_FILE_FALLBACK"):
             return HttpTransport()
         return self._file
@@ -274,5 +433,16 @@ class AutoTransport(Transport):
         data.setdefault("transport", t.name)
         return data
 
-    def execute(self, code: str, args: dict, timeout: float) -> dict:
-        return self._pick().execute(code, args, timeout)
+    def execute(self, code: str, args: dict, timeout: float, dialogs: list[dict] | None = None) -> dict:
+        return self._pick().execute(code, args, timeout, dialogs)
+
+    def dialogs(self) -> dict:
+        return self._pick().dialogs()
+
+    def answer_dialog(self, button: str | None = None, dialog_id: str | None = None,
+                      check: list[str] | None = None, uncheck: list[str] | None = None,
+                      wait: float = 600.0) -> dict:
+        return self._pick().answer_dialog(button, dialog_id, check, uncheck, wait)
+
+    def wait_pending(self, wait: float) -> dict | None:
+        return self._pick().wait_pending(wait)

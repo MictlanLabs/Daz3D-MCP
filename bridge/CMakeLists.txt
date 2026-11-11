@@ -6,7 +6,7 @@
 #
 # The result is bridge/build/.../dazmcp_bridge.dylib (macOS) or dsp_dazmcp_bridge.dll (Windows).
 cmake_minimum_required(VERSION 3.21)
-project(dazmcp_bridge VERSION 0.1.0 LANGUAGES CXX)
+project(dazmcp_bridge VERSION 0.2.0 LANGUAGES CXX)
 
 set(DAZ_SDK_DIR "" CACHE PATH "Root folder of the Daz Studio SDK (contains include/ and lib/)")
 if(NOT DAZ_SDK_DIR)

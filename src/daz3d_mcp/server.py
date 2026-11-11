@@ -24,6 +24,8 @@ Tools to control a running Daz Studio (3D characters and scenes).
 Start with daz_status, then scene_info to learn what is in the scene, and
 viewport_capture to look at it. Units are centimeters and Y is up.
 Never discard unsaved work without asking the user.
+If a call fails with dialog_open, Daz Studio stopped on a pop-up dialog: read
+its text and buttons and answer it with daz_dialog; the call then finishes.
 To build scenes: content_search finds installed figures, clothing, hair, poses
 and props; content_load adds them (clothing, hair and poses need a target
 figure); figure_info, morph_set and pose_bones adjust characters; prop_surfaces,
@@ -87,6 +89,41 @@ def create_server(client: DazClient | None = None) -> FastMCP:
             raise ToolError(str(exc)) from exc
         info = await call("status")
         return {"mcp_version": __version__, "bridge": bridge, "daz": info}
+
+    @mcp.tool(annotations=DESTRUCTIVE)
+    async def daz_dialog(
+        button: Annotated[str | None, Field(description="Button to press, as listed (e.g. \"Yes\", \"Replace\"); "
+                                                        "\"escape\" cancels. Omit to only look.")] = None,
+        check: Annotated[list[str] | None, Field(description="Check boxes or radio buttons to turn on "
+                                                             "before pressing.")] = None,
+        uncheck: Annotated[list[str] | None, Field(description="Check boxes to turn off before pressing.")] = None,
+        dialog_id: Annotated[str | None, Field(description="Which dialog, when several are open (id from "
+                                                           "the list).")] = None,
+        wait: Annotated[float, Field(ge=0, le=7200, description="Seconds to wait for the stopped call to "
+                                                                "finish after answering.")] = 600,
+    ) -> dict:
+        """Sees and answers the pop-up dialogs Daz Studio opens (overwrite?, replace or add?, limits...).
+        A tool that stops on one fails with dialog_open and lists its text and buttons; press one here
+        and the stopped call's result comes back as call_result. Without button: lists open dialogs
+        and, if a call was left waiting, waits for it. Ask the user before an answer that would
+        overwrite or discard their work. Needs the bridge plugin 0.2+."""
+        client = get_client()
+
+        def work() -> dict:
+            if button or check or uncheck:
+                return client.answer_dialog(button, dialog_id, check, uncheck, wait)
+            listing = client.dialogs()
+            if listing.get("waiting_call") and not [d for d in listing["dialogs"] if not d.get("progress")]:
+                done = client.wait_pending(wait)
+                if done is not None:
+                    listing.update(done)
+                    listing["waiting_call"] = False
+            return listing
+
+        try:
+            return await anyio.to_thread.run_sync(work)
+        except DazError as exc:
+            raise ToolError(str(exc)) from exc
 
     @mcp.tool(annotations=READ_ONLY)
     async def scene_info(

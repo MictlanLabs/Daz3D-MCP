@@ -71,6 +71,7 @@ It is slower but needs nothing compiled.
 | Tool | What it does |
 | --- | --- |
 | `daz_status` | Checks the connection; Daz version and open scene |
+| `daz_dialog` | Sees and answers pop-up dialogs Daz stops on (overwrite?, replace?); needs plugin 0.2+ |
 | `scene_info` | Figures, clothing, props, cameras and lights with position, rotation, size |
 | `scene_new` | Clears the scene (refuses to lose unsaved work unless told) |
 | `scene_open` | Opens or merges a `.duf` scene |
@@ -150,6 +151,7 @@ Content search runs in the MCP server on an index of the library files
 | `content_index_max_age_hours` | `24` | When to rebuild the content index |
 | `install_library` | `~/Documents/DAZ 3D/Third Party Library` | Where `package_install` puts packages |
 | `max_package_gb` | `20` | Largest package (unpacked) `package_install` accepts |
+| `dialog_rules` | `[]` | Answers to Daz dialogs given in advance, e.g. `[{"match": "outside the limits", "button": "Turn Limits Off"}]` (plugin 0.2+) |
 | `rotation_convention` | measured | How Daz turns bones; the first `anim_import` measures it and caches it in `~/.daz3d-mcp/animation.json` |
 
 ## Security

@@ -588,7 +588,7 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient]) -> C
         result = await call("render", _clean(out_path=out.as_posix(), preview_path=preview.as_posix(),
                                              preview_size=preview_size, camera=camera, width=width, height=height,
                                              max_samples=max_samples, max_time=max_time, quality=quality,
-                                             frame=frame),
+                                             frame=frame, overwrite=overwrite or None),
                             timeout=settings.render_timeout)
         content: list = []
         shown = Path(result["preview"]) if result.get("preview") else Path(result["path"])

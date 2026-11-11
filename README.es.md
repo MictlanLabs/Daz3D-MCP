@@ -73,6 +73,7 @@ script. Es más lento pero no necesita compilar nada.
 | Herramienta | Qué hace |
 | --- | --- |
 | `daz_status` | Comprueba la conexión; versión de Daz y escena abierta |
+| `daz_dialog` | Ve y contesta las ventanas emergentes en las que Daz se detiene (¿sobrescribir?, ¿reemplazar?); requiere el plugin 0.2+ |
 | `scene_info` | Figuras, ropa, props, cámaras y luces con posición, rotación y tamaño |
 | `scene_new` | Vacía la escena (no pierde cambios sin guardar salvo que se pida) |
 | `scene_open` | Abre o fusiona una escena `.duf` |
@@ -153,6 +154,7 @@ Daz Studio.
 | `content_index_max_age_hours` | `24` | Cada cuánto se reconstruye el índice de contenido |
 | `install_library` | `~/Documents/DAZ 3D/Third Party Library` | Dónde instala `package_install` los paquetes |
 | `max_package_gb` | `20` | Paquete más grande (descomprimido) que acepta `package_install` |
+| `dialog_rules` | `[]` | Respuestas a diálogos de Daz dadas de antemano, p. ej. `[{"match": "outside the limits", "button": "Turn Limits Off"}]` (plugin 0.2+) |
 | `rotation_convention` | medida | Cómo gira Daz los huesos; el primer `anim_import` la mide y la guarda en `~/.daz3d-mcp/animation.json` |
 
 ## Seguridad

@@ -8,6 +8,8 @@
 int main(int argc, char **argv) {
 	qputenv("QT_QPA_PLATFORM", "offscreen");
 	DzApp app(argc, argv);
+	// Daz has a main window; here a closed test dialog must not end the app.
+	app.setQuitOnLastWindowClosed(false);
 	QLibrary lib(QString::fromLocal8Bit(argv[1]));
 	if (!lib.load()) { std::fprintf(stderr, "load failed: %s\n", qPrintable(lib.errorString())); return 2; }
 	QTimer::singleShot(atoi(argv[2]) * 1000, &app, &QCoreApplication::quit);
