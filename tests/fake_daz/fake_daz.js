@@ -713,6 +713,8 @@ global.Scene = {
 			if (gone[n.parent]) { n.parent = null; }
 			if (gone[n.fitted_to]) { n.fitted_to = null; }
 		});
+		// Daz Studio 6 destroys the object: calling its methods afterwards fails.
+		node.getLabel = function () { throw new TypeError("Property 'getLabel' of object is not a function"); };
 		changed();
 		return true;
 	},
@@ -814,6 +816,10 @@ function openContent(file) {
 	var target = primary();
 	var figure = target && target.inherits("DzFigure") ? target : null;
 	var added = null;
+	var assetType = (data.asset_info || {}).type;
+	if (assetType === "character" && figure && appSettings.DSONCharacterShowLoadDlg !== "false") {
+		throw new Error("Character Load Options dialog opened (modal); the script is blocked.");
+	}
 	state.loaded.push({ file: path.basename(file), target: target ? target.getLabel() : null });
 	(fake.add || []).forEach(function (spec) { added = addFromTemplate(spec, target); });
 	if (fake.pose && figure) {
@@ -847,11 +853,64 @@ function openContent(file) {
 }
 
 // ------------------------------------------------------------- render ----
+// Like Daz Studio 6: DzRenderOptions has no setImageSize/setAspectConstrained.
+// The size is the "Pixel Size (Global)" DzInt2Property of the General Render
+// element, and it is ignored while "Dimension Preset (Global)" is
+// "Active Viewport" (the default), when Iray renders at the viewport size.
+var VIEWPORT_SIZE = [983, 865];
+global.DzInt2 = function (x, y) { this.x = x; this.y = y; };
+function generalRenderElement() {
+	var r = state.render;
+	if (r.preset === undefined) { r.preset = "Active Viewport"; }
+	function prop(label, name, get, set, extra) {
+		var o = { getLabel: function () { return label; }, getName: function () { return name; },
+			name: name, className: function () { return "DzProperty"; },
+			getValue: get, setValue: function (v) { set(v); saveState(); } };
+		Object.keys(extra || {}).forEach(function (k) { o[k] = extra[k]; });
+		return o;
+	}
+	var props = [
+		prop("Dimension Preset (Global)", "Dimension Preset", function () { return r.preset; },
+			function (v) { r.preset = v === "Custom" ? "" : String(v); }),
+		prop("Pixel Size (Global)", "Pixel Size", function () { return r.width; }, function () {
+			throw new TypeError("setValue on a DzInt2Property sets both components; use setInt2Value(DzInt2).");
+		}, {
+			getInt2Value: function () { return new global.DzInt2(r.width, r.height); },
+			setInt2Value: function (v) {
+				if (!(v instanceof global.DzInt2)) {
+					throw new TypeError("Passing incompatible arguments to C++ functions from JavaScript is not allowed.");
+				}
+				r.width = v.x; r.height = v.y; saveState();
+			}
+		}),
+		prop("Constrain Proportions (Global)", "Constrain Proportions", function () { return !!r.constrain; },
+			function (v) { r.constrain = !!v; })
+	];
+	function byLabel(l) {
+		for (var i = 0; i < props.length; i++) { if (props[i].getLabel() === l) { return props[i]; } }
+		return null;
+	}
+	return {
+		name: "General Render",
+		findPropertyByLabel: byLabel,
+		findProperty: function (n) {
+			for (var i = 0; i < props.length; i++) { if (props[i].getName() === n) { return props[i]; } }
+			return null;
+		},
+		getNumProperties: function () { return props.length; },
+		getProperty: function (i) { return props[i]; }
+	};
+}
+function renderedSize() {
+	var r = state.render;
+	if (r.preset === undefined || r.preset === "Active Viewport") { return VIEWPORT_SIZE; }
+	return [r.width, r.height];
+}
+
 function renderOptions() {
 	return {
 		getImageSize: function () { return new global.Size(state.render.width, state.render.height); },
-		setImageSize: function (s) { state.render.width = s.width; state.render.height = s.height; saveState(); },
-		setAspectConstrained: function () {},
+		setAspectRatio: function () {},
 		setRenderImgToId: function (id) { state.render.toId = id; },
 		setRenderImgFilename: function (f) { state.render.filename = f; },
 		setIsCurrentFrameRender: function () {}
@@ -902,7 +961,7 @@ function renderSummary(cam) {
 var renderMgr = {
 	getRenderOptions: renderOptions,
 	getActiveRenderer: function () { return { getName: function () { return "NVIDIA Iray"; } }; },
-	getRenderElementObjects: function () { return [propertyHost(state.renderProps)]; },
+	getRenderElementObjects: function () { return [generalRenderElement(), propertyHost(state.renderProps)]; },
 	doRender: function () {
 		if (state.render.toId !== DzRenderOptions.DirectToFile || !state.render.filename) { return false; }
 		var cam = viewport3d.getCamera();
@@ -910,8 +969,8 @@ var renderMgr = {
 		state.renders.push({
 			file: state.render.filename,
 			camera: cam ? cam.getLabel() : null,
-			width: state.render.width,
-			height: state.render.height,
+			width: renderedSize()[0],
+			height: renderedSize()[1],
 			max_samples: state.renderProps["Max Samples"].value,
 			max_time: state.renderProps["Max Time (secs)"].value,
 			lights: state.nodes.filter(function (n) { return /Light$/.test(n.class); }).length,
@@ -1009,6 +1068,18 @@ global.DzFile = function (p) {
 	this.rename = function (n) { fs.renameSync(p, n); p = n; return true; };
 };
 global.DzFile.WriteOnly = 2;
+
+// ------------------------------------------------------- app settings ----
+// DzAppSettings over one in-memory store (Daz keeps them in the registry or
+// a plist). Daz Studio 6 reads DSONCharacterShowLoadDlg before loading a
+// character preset onto a selected figure and shows a modal dialog if true.
+var appSettings = {};
+global.DzAppSettings = function () {
+	this.getStringValue = function (k, d) { return k in appSettings ? appSettings[k] : (d === undefined ? "" : d); };
+	this.setStringValue = function (k, v) { appSettings[k] = String(v); };
+	this.removeValue = function (k) { delete appSettings[k]; };
+};
+global.__fakeAppSettings = appSettings;
 
 // ------------------------------------------------------------ import ----
 // The OBJ and FBX importers. Like Daz Studio, they show an options dialog

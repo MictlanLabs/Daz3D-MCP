@@ -75,6 +75,10 @@ frame 32 repeats frame 0. Values are Genesis 9 dials, in degrees.
 
 - Arms swing opposite to the legs (left arm back when the left leg is forward):
   upper arm Y about 20 at contact, 0 at passing; forearms a little bent.
+  The arms are mirrored: on Genesis 9 the same Y value on `l_upperarm` and
+  `r_upperarm` swings them in opposite directions (+20 takes the left arm
+  back and the right arm forward). So key both at +20 when the left leg is in
+  front and both at -20 when the right leg is, and check with `anim_sample`.
 - Travel: the hip moves forward one step per half cycle. A step is about
   `2 * leg length * sin(thigh swing)`, about 70 to 75 cm for a Genesis 9 at
   25 degrees. Key the hip z at every key pose (18.4 cm every 4 frames, 147 cm

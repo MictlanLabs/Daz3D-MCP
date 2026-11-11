@@ -18,10 +18,26 @@ var LABELS = {
 	draw_dome: ["Draw Dome"]
 };
 
+// A new Daz Studio 6 scene has no Environment Options node, so none of the
+// labels above exist until one is added (Daz adds it when a preset needs it).
+function ensureEnvironmentNode(args) {
+	var key, wanted = false;
+	for (key in LABELS) {
+		if (LABELS.hasOwnProperty(key) && args[key] !== undefined && args[key] !== null) { wanted = true; }
+	}
+	if (!wanted || DazMcp.findRenderProp(LABELS.mode)) { return false; }
+	if (typeof DzEnvironmentNode === "undefined") { return false; }
+	var node = new DzEnvironmentNode();
+	node.setLabel("Environment Options");
+	Scene.addNode(node);
+	return true;
+}
+
 function dazmcpTool(args) {
 	var set = [];
 	var notFound = [];
 	var key, p, value;
+	var created = ensureEnvironmentNode(args);
 	for (key in LABELS) {
 		if (!LABELS.hasOwnProperty(key) || args[key] === undefined || args[key] === null) { continue; }
 		p = DazMcp.findRenderProp(LABELS[key]);
@@ -46,5 +62,7 @@ function dazmcpTool(args) {
 		if (!p) { continue; }
 		now[key] = key === "hdri" ? DazMcp.mapPath(p) : DazMcp.propInfo(p).value;
 	}
-	return { set: set, not_found: notFound, environment: now };
+	var result = { set: set, not_found: notFound, environment: now };
+	if (created) { result.created = "Environment Options"; }
+	return result;
 }

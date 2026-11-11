@@ -12,13 +12,13 @@ function dazmcpTool(args) {
 	var fig = DazMcp.requireFigure(args.figure);
 	if (!args.path || !DazMcp.fileExists(args.path)) { throw DazMcp.fail("not_found", "File not found: " + args.path); }
 	var keep = Scene.getTime();
-	var before = DazMcp.keyRange(DazMcp.channels(fig, { only_keyed: true }));
+	var before = DazMcp.keyRange(DazMcp.channels(fig, { animated: true }));
 	Scene.setTime(DazMcp.frameTime(args.frame || 0));
 	DazMcp.selectOnly(fig);
 	var ok = App.getContentMgr().openFile(args.path, true);
 	Scene.setTime(keep);
 	if (ok === false) { throw DazMcp.fail("load_failed", "Daz Studio could not load " + args.path + "."); }
-	var ch = DazMcp.channels(fig, { only_keyed: true });
+	var ch = DazMcp.channels(fig, { animated: true });
 	var kr = DazMcp.keyRange(ch);
 	var out = { figure: fig.getLabel(), loaded: args.path, start_frame: args.frame || 0, animated_channels: ch.length };
 	if (kr) {

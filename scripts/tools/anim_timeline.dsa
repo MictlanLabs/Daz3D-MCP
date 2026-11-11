@@ -63,7 +63,7 @@ function dazmcpTool(args) {
 		all = Scene.getNodeList();
 		for (i = 0; i < all.length && info.animated.length < 100; i++) {
 			if (DazMcp.nodeType(all[i]) === "bone") { continue; }
-			ch = DazMcp.channels(all[i], { only_keyed: true });
+			ch = DazMcp.channels(all[i], { animated: true });
 			if (!ch.length) { continue; }
 			var kr = DazMcp.keyRange(ch);
 			var bonesKeyed = {};

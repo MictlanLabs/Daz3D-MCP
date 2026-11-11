@@ -6,6 +6,15 @@
 //   nodes       (string[], required) labels
 //   with_fitted (bool, default true) also delete what is fitted to a figure
 
+function inScene(id) {
+	var all = Scene.getNodeList();
+	var k;
+	for (k = 0; k < all.length; k++) {
+		if (DazMcp.idOf(all[k]) === id) { return true; }
+	}
+	return false;
+}
+
 function dazmcpTool(args) {
 	var refs = args.nodes || [];
 	var withFitted = args.with_fitted !== false;
@@ -24,8 +33,20 @@ function dazmcpTool(args) {
 			for (j = 0; j < extra.length; j++) { list.push(extra[j]); }
 		}
 	}
+	// Daz Studio 6 destroys a node as soon as it is removed (and a figure takes
+	// its followers with it), so read every label and id before removing any.
+	var labels = [];
+	var ids = [];
 	for (i = 0; i < list.length; i++) {
-		if (Scene.removeNode(list[i]) !== false) { deleted.push(list[i].getLabel()); }
+		labels.push(list[i].getLabel());
+		ids.push(DazMcp.idOf(list[i]));
+	}
+	for (i = 0; i < list.length; i++) {
+		if (!inScene(ids[i])) {
+			deleted.push(labels[i]);  // already gone with its figure
+			continue;
+		}
+		if (Scene.removeNode(list[i]) !== false) { deleted.push(labels[i]); }
 	}
 	return { deleted: deleted, node_count: Scene.getNumNodes() };
 }

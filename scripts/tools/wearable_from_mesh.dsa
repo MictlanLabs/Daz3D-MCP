@@ -23,6 +23,20 @@
 //   label         (string) label for the new item
 //   allow_posed   (bool) do not stop when the figure is posed
 
+function hasMesh(node) {
+	try { return !!(node.getObject() && node.getObject().getCurrentShape()); } catch (e) { return false; }
+}
+
+function meshDescendants(node) {
+	var out = [];
+	var kids, i;
+	try { kids = node.getNodeChildren(true); } catch (e) { kids = []; }
+	for (i = 0; i < kids.length; i++) {
+		if (DazMcp.nodeType(kids[i]) !== "bone" && hasMesh(kids[i])) { out.push(kids[i]); }
+	}
+	return out;
+}
+
 function dazmcpTool(args) {
 	var item = DazMcp.requireNode(args.item, "item");
 	var fig = DazMcp.requireNode(args.figure, "figure");
@@ -38,6 +52,22 @@ function dazmcpTool(args) {
 		}
 	}
 	if (DazMcp.same(fig, item)) { throw DazMcp.fail("bad_args", "item and figure are the same node."); }
+	// An FBX exported from Daz brings the figure's skeleton as a DzFigure with
+	// no mesh, and the garment as a child node. Convert that child instead.
+	var wrapper = null;
+	if (!hasMesh(item)) {
+		var meshes = meshDescendants(item);
+		if (meshes.length === 1) {
+			wrapper = item;
+			item = meshes[0];
+			type = DazMcp.nodeType(item);
+		} else if (meshes.length > 1) {
+			var names = [];
+			for (t = 0; t < meshes.length; t++) { names.push(meshes[t].getLabel()); }
+			throw DazMcp.fail("bad_args", args.item + " has no mesh of its own; convert one of its meshes: " +
+				names.join(", ") + ".", { meshes: names });
+		}
+	}
 	if (type !== "prop" && type !== "figure" && type !== "fitted_figure") {
 		throw DazMcp.fail("bad_args", args.item + " is a " + type + "; only meshes and clothing can be converted.");
 	}
@@ -95,7 +125,13 @@ function dazmcpTool(args) {
 	if (!out.getFollowTarget || !out.getFollowTarget()) {
 		try { out.setFollowTarget(fig); } catch (e2) { /* reported below */ }
 	}
-	if (args.label) { out.setLabel(args.label); }
+	var wrapperLabel = null;
+	if (wrapper && meshDescendants(wrapper).length === 0) {
+		// Only the empty skeleton is left: remove it so it does not clutter the scene.
+		wrapperLabel = wrapper.getLabel();
+		Scene.removeNode(wrapper);
+	}
+	if (args.label) { out.setLabel(args.label); } else if (wrapperLabel) { out.setLabel(wrapperLabel); }
 	t = out.getFollowTarget ? out.getFollowTarget() : null;
 	var bones = DazMcp.bones(out).length;
 	var morphs = DazMcp.morphList(out, { include_hidden: true, limit: 1 }).total;
@@ -111,5 +147,6 @@ function dazmcpTool(args) {
 	};
 	if (!t) { result.warning = "The new item is not fitted; try wearable_fit."; }
 	if (posed.length) { result.note = "Load the pose again: the item now follows the figure."; }
+	if (wrapper) { result.converted_mesh = "Used the mesh inside " + args.item + (wrapperLabel ? " and removed its empty skeleton." : "."); }
 	return result;
 }

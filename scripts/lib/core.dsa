@@ -732,7 +732,25 @@ DazMcp.applyRenderSettings = function (args) {
 		var w = args.width || Math.round((args.height) * size.width / size.height);
 		var h = args.height || Math.round((args.width) * size.height / size.width);
 		try { opts.setAspectConstrained(false); } catch (e0) { /* ignore */ }
-		try { opts.setImageSize(new Size(w, h)); } catch (e) { opts.imageSize = new Size(w, h); }
+		try {
+			opts.setImageSize(new Size(w, h));
+		} catch (e) {
+			// Daz Studio 6: DzRenderOptions has no setImageSize; the size lives in
+			// the "Pixel Size (Global)" DzInt2Property of the General Render element.
+			p = DazMcp.findRenderProp(["Pixel Size (Global)", "Pixel Size"]);
+			r = DazMcp.findRenderProp(["Constrain Proportions (Global)", "Constrain Proportions"]);
+			if (p && typeof DzInt2 !== "undefined") {
+				// With "Dimension Preset" = "Active Viewport" (the default) Iray
+				// renders at the viewport's size and ignores Pixel Size.
+				var preset = DazMcp.findRenderProp(["Dimension Preset (Global)", "Dimension Preset"]);
+				if (preset) { preset.setValue("Custom"); }
+				if (r) { r.setValue(false); }
+				p.setInt2Value(new DzInt2(w, h));
+				try { opts.setAspectRatio(w, h); } catch (e1) { /* ignore */ }
+			} else {
+				opts.imageSize = new Size(w, h);
+			}
+		}
 	}
 	if (args.quality !== undefined && args.quality !== null) {
 		p = DazMcp.findRenderProp(["Rendering Quality Enable"]);
@@ -820,13 +838,16 @@ DazMcp.contentDirs = function () {
 	return out;
 };
 
-// Bones rotated more than half a degree.
+// Bones rotated more than half a degree. Eyes do not count: Genesis 9 loads
+// with its eyes turned 3 degrees (l_eye -3, r_eye +3 Side-Side), and they never
+// move clothing.
 DazMcp.posedBones = function (figure) {
 	var bones = DazMcp.bones(figure);
 	var out = [];
 	var i, b;
 	for (i = 0; i < bones.length; i++) {
 		b = bones[i];
+		if (/^[lr]_?eye$|^(left|right)eye$/i.test(b.getName())) { continue; }
 		if (Math.abs(b.getXRotControl().getValue()) > 0.5 || Math.abs(b.getYRotControl().getValue()) > 0.5 ||
 				Math.abs(b.getZRotControl().getValue()) > 0.5) {
 			out.push(b.getName());
@@ -920,6 +941,18 @@ DazMcp.numKeys = function (prop) {
 	try { return prop.getNumKeys(); } catch (e) { return 0; }
 };
 
+// Daz Studio 6 keeps one key at frame 0 on every property, animated or not,
+// so a property is animated only when it has more keys, or its one key is
+// somewhere else.
+DazMcp.isAnimated = function (prop) {
+	var n = DazMcp.numKeys(prop);
+	if (n > 1) { return true; }
+	if (n === 1) {
+		try { return prop.getKeyTime(0) !== 0; } catch (e) { return true; }
+	}
+	return false;
+};
+
 // [[time, value], ...] of an animated property.
 DazMcp.readKeys = function (prop) {
 	var out = [];
@@ -973,7 +1006,8 @@ DazMcp.transformControls = function (node, kind) {
 // Everything of a node that can be animated, as channels:
 //   {group: "node"|"bones"|"morphs", item, kind, axis, prop}
 //   opts.bones: false to skip bones; opts.morphs: false to skip morphs;
-//   opts.only_keyed: only channels with keys; opts.bone_list: only these bones.
+//   opts.only_keyed: only channels with keys; opts.animated: only animated
+//   channels (see DazMcp.isAnimated); opts.bone_list: only these bones.
 DazMcp.channels = function (node, opts) {
 	var out = [];
 	var kinds = ["position", "rotation", "scale"];
@@ -981,6 +1015,7 @@ DazMcp.channels = function (node, opts) {
 	opts = opts || {};
 	var add = function (group, item, kind, axis, prop) {
 		if (opts.only_keyed && !DazMcp.numKeys(prop)) { return; }
+		if (opts.animated && !DazMcp.isAnimated(prop)) { return; }
 		out.push({ group: group, item: item, kind: kind, axis: axis, prop: prop });
 	};
 	if (opts.node !== false) {

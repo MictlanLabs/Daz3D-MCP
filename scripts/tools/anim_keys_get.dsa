@@ -27,6 +27,9 @@ function dazmcpTool(args) {
 		g = groups[id];
 		if (!g) { g = groups[id] = { group: c.group, item: c.item, kind: c.kind, props: [], times: {} }; }
 		g.props[c.axis] = c.prop;
+		// Daz Studio 6 keeps a key at frame 0 on every property: report an item
+		// only when one of its axes really is animated.
+		if (DazMcp.isAnimated(c.prop)) { g.animated = true; }
 		keys = DazMcp.readKeys(c.prop);
 		for (j = 0; j < keys.length; j++) {
 			if (keys[j][0] < lo || keys[j][0] > hi) { continue; }
@@ -40,6 +43,7 @@ function dazmcpTool(args) {
 	for (id in groups) {
 		if (!groups.hasOwnProperty(id)) { continue; }
 		g = groups[id];
+		if (!g.animated) { continue; }
 		var times = [];
 		for (j in g.times) { if (g.times.hasOwnProperty(j)) { times.push(Number(j)); } }
 		if (!times.length) { continue; }
