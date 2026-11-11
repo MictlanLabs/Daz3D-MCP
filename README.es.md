@@ -109,6 +109,7 @@ script. Es más lento pero no necesita compilar nada.
 | `material_list` / `material_set` | Lee y cambia superficies (colores, rugosidad, texturas) |
 | `render_settings` | Tamaño de imagen y límites de Iray |
 | `render` | Renderiza a un archivo y devuelve la imagen |
+| `render_animation` | Renderiza cada cuadro de la animación y los une en un MP4 o GIF |
 | `run_script` | Ejecuta DazScript para todo lo demás (se puede desactivar) |
 | `daz_guide` | Devuelve las skills como texto para agentes sin soporte de skills |
 
@@ -139,6 +140,7 @@ Daz Studio.
 | `timeout` | `600` | Segundos de espera por petición |
 | `render_timeout` | `3600` | Segundos de espera por render |
 | `render_dir` | `~/.daz3d-mcp/renders` | Dónde van los renders sin ruta |
+| `ffmpeg` | detectado | ffmpeg que usa `render_animation` para los vídeos (PATH, luego el que trae Daz Studio) |
 | `content_libraries` | `[]` | Carpetas de biblioteca extra para buscar |
 | `content_index_max_age_hours` | `24` | Cada cuánto se reconstruye el índice de contenido |
 | `install_library` | `~/Documents/DAZ 3D/Third Party Library` | Dónde instala `package_install` los paquetes |

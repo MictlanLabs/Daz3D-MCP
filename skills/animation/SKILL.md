@@ -153,6 +153,7 @@ anim_preview()
 
 ## Rendering an animation
 
-`anim_preview` shows the viewport. For final frames, render single frames with
-`anim_timeline(frame=N)` then `render`. Rendering a whole animation takes long:
-agree with the user on the frames, size and time per frame first.
+`anim_preview` shows the viewport. To render the animation with Iray use
+`render_animation` (see the `rendering` skill): one image per frame, joined
+into an MP4. It takes about frames x `max_time`: agree with the user on the
+frames, size and time per frame first. A single frame is `render(frame=N)`.

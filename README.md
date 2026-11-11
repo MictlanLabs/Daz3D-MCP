@@ -107,6 +107,7 @@ It is slower but needs nothing compiled.
 | `material_list` / `material_set` | Reads and changes surfaces (colors, roughness, texture maps) |
 | `render_settings` | Image size and Iray limits |
 | `render` | Renders to a file and returns the image |
+| `render_animation` | Renders every frame of the animation and joins them into an MP4 or GIF |
 | `run_script` | Runs DazScript for anything else (can be disabled) |
 | `daz_guide` | Returns the skills as text for agents without skills support |
 
@@ -136,6 +137,7 @@ Content search runs in the MCP server on an index of the library files
 | `timeout` | `600` | Seconds to wait for one request |
 | `render_timeout` | `3600` | Seconds to wait for one render |
 | `render_dir` | `~/.daz3d-mcp/renders` | Where renders go when no path is given |
+| `ffmpeg` | detected | ffmpeg used by `render_animation` for videos (PATH, then the one Daz Studio ships) |
 | `content_libraries` | `[]` | Extra library folders to search |
 | `content_index_max_age_hours` | `24` | When to rebuild the content index |
 | `install_library` | `~/Documents/DAZ 3D/Third Party Library` | Where `package_install` puts packages |

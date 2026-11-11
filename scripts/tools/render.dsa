@@ -6,6 +6,8 @@
 //   preview_path (string) where to also save a small preview
 //   preview_size (int, default 1024)
 //   camera       (string) camera label; default: the active viewport camera
+//   frame        (int) timeline frame to render; default: the current frame.
+//                The scene goes back to the frame it was on afterwards.
 //   width, height, max_samples, max_time, quality: as in render_settings
 
 function dazmcpTool(args) {
@@ -24,6 +26,11 @@ function dazmcpTool(args) {
 		if (v3d) { v3d.setCamera(camera); }
 	}
 
+	var previousFrame = Scene.getFrame();
+	var hasFrame = args.frame !== undefined && args.frame !== null;
+	if (hasFrame) { Scene.setFrame(args.frame); }
+	var frame = Scene.getFrame();
+
 	var mgr = App.getRenderMgr();
 	var opts = mgr.getRenderOptions();
 	try { opts.setRenderImgToId(DzRenderOptions.DirectToFile); } catch (e) { opts.renderImgToId = DzRenderOptions.DirectToFile; }
@@ -35,6 +42,7 @@ function dazmcpTool(args) {
 	var seconds = (new Date().getTime() - started) / 1000;
 
 	if (args.camera && v3d && previous) { v3d.setCamera(previous); }
+	if (hasFrame) { Scene.setFrame(previousFrame); }
 
 	if (ok === false || !DazMcp.fileExists(outPath)) {
 		throw DazMcp.fail("render_failed", "The render did not produce " + outPath + ".",
@@ -61,6 +69,7 @@ function dazmcpTool(args) {
 		path: outPath,
 		preview: preview,
 		camera: camera ? camera.getLabel() : null,
+		frame: frame,
 		seconds: DazMcp.round(seconds, 1),
 		settings: settings
 	};

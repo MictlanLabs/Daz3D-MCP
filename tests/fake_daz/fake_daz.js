@@ -25,6 +25,7 @@ state.renders = state.renders || [];
 state.loaded = state.loaded || [];
 state.render = state.render || { width: 1920, height: 1080 };
 state.renderProps = state.renderProps || defaultRenderProps();
+Object.keys(state.renderProps).forEach(function (k) { state.renderProps[k].render = true; });
 
 var dirty = false;
 function saveState() { dirty = true; }
@@ -229,7 +230,8 @@ Prop.prototype.getValue = function (t) {
 	return this.d.value;
 };
 Prop.prototype.setValue = function (v) {
-	if (arguments.length > 1 || (this.d.keys && this.d.keys.length) || (now() !== 0 && (this.d.type || "float") === "float")) {
+	// Render settings are not animatable: they never get keys.
+	if (!this.d.render && (arguments.length > 1 || (this.d.keys && this.d.keys.length) || (now() !== 0 && (this.d.type || "float") === "float"))) {
 		var d = this.d;
 		var host = {};
 		keyMethods(host, function (create) { if (create && !d.keys) { d.keys = []; } return d.keys || null; },
@@ -976,6 +978,7 @@ var renderMgr = {
 		state.renders.push({
 			file: state.render.filename,
 			camera: cam ? cam.getLabel() : null,
+			frame: Scene.getFrame(),
 			width: renderedSize()[0],
 			height: renderedSize()[1],
 			max_samples: state.renderProps["Max Samples"].value,

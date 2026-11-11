@@ -9,13 +9,14 @@ from pathlib import Path
 from typing import Annotated, Any, Awaitable, Callable, Literal
 
 import anyio
-from mcp.server.fastmcp import FastMCP, Image
+from mcp.server.fastmcp import Context, FastMCP, Image
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from daz3d_mcp.client import DazClient
 from daz3d_mcp.content import KINDS, ContentIndex, thumbnail_of
+from daz3d_mcp import video
 from daz3d_mcp.paths import config_dir
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
@@ -376,6 +377,8 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient]) -> C
                                                           "~/.daz3d-mcp/renders/.")] = None,
         overwrite: bool = False,
         preview_size: Annotated[int, Field(ge=64, le=4096)] = 1024,
+        frame: Annotated[int | None, Field(ge=0, description="Timeline frame to render; default the "
+                                                             "current one.")] = None,
     ) -> list:
         """Renders the scene with the current renderer (Iray), waits until it is done and returns the
         image. Set max_time or max_samples so a test render does not run for long."""
@@ -395,7 +398,8 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient]) -> C
         preview = captures / f"render-preview-{int(time.time() * 1000)}.png"
         result = await call("render", _clean(out_path=out.as_posix(), preview_path=preview.as_posix(),
                                              preview_size=preview_size, camera=camera, width=width, height=height,
-                                             max_samples=max_samples, max_time=max_time, quality=quality),
+                                             max_samples=max_samples, max_time=max_time, quality=quality,
+                                             frame=frame),
                             timeout=settings.render_timeout)
         content: list = []
         shown = Path(result["preview"]) if result.get("preview") else Path(result["path"])
@@ -403,6 +407,135 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient]) -> C
             fmt = "jpeg" if shown.suffix.lower() in (".jpg", ".jpeg") else "png"
             if shown.suffix.lower() in (".png", ".jpg", ".jpeg"):
                 content.append(Image(data=shown.read_bytes(), format=fmt))
+        content.append(json.dumps(result))
+        return content
+
+    @mcp.tool(annotations=CHANGES_SCENE, structured_output=False)
+    async def render_animation(
+        ctx: Context,
+        camera: Annotated[str | None, Field(description="Camera label; default is the active one.")] = None,
+        start_frame: Annotated[int | None, Field(ge=0, description="Default: start of the timeline range.")] = None,
+        end_frame: Annotated[int | None, Field(ge=0, description="Default: end of the timeline range.")] = None,
+        step: Annotated[int, Field(ge=1, le=100, description="Render every n-th frame (2 = half the frames).")] = 1,
+        width: Annotated[int | None, Field(ge=16, le=16384)] = None,
+        height: Annotated[int | None, Field(ge=16, le=16384)] = None,
+        max_samples: Annotated[int | None, Field(ge=1, description="Per frame.")] = None,
+        max_time: Annotated[float | None, Field(ge=1, description="Seconds per frame. Set it: the total "
+                                                                  "is about frames x max_time.")] = None,
+        quality: Annotated[float | None, Field(gt=0)] = None,
+        out_dir: Annotated[str | None, Field(description="Absolute folder for the frames and the video; "
+                                                         "default a new folder in ~/.daz3d-mcp/renders/.")] = None,
+        name: Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$",
+                                   description="File name start: <name>_0000.png ...")] = "frame",
+        image_format: Literal["png", "jpg"] = "png",
+        video_format: Annotated[Literal["mp4", "gif", "none"], Field(description="Also join the frames into "
+                                                                                 "a video (needs ffmpeg; Daz "
+                                                                                 "Studio ships one).")] = "mp4",
+        fps: Annotated[float | None, Field(gt=0, le=240, description="Video frame rate; default timeline "
+                                                                     "fps / step.")] = None,
+        resume: Annotated[bool, Field(description="Keep frames already in out_dir and render only the missing "
+                                                  "ones (to continue a stopped render).")] = True,
+        previews: Annotated[int, Field(ge=0, le=6, description="Frames to return as images.")] = 3,
+        preview_size: Annotated[int, Field(ge=64, le=2048)] = 512,
+    ) -> list:
+        """Renders the whole animation (or a frame range) with Iray, one image per frame, and joins
+        them into an MP4 or GIF. Waits until it is done. It takes about frames x max_time: render a
+        short range or a few frames (step) first, and ask the user before a long render."""
+        settings = get_client().settings
+        tl = await call("anim_timeline", {"list_animated": False})
+        tl_fps = float(tl.get("fps") or 30)
+        a = int(tl["start_frame"]) if start_frame is None else start_frame
+        b = int(tl["end_frame"]) if end_frame is None else end_frame
+        if b < a:
+            raise ToolError(f"end_frame ({b}) is before start_frame ({a}).")
+        frames = list(range(a, b + 1, step))
+        if out_dir:
+            folder = Path(_abs(out_dir))
+        else:
+            base = Path(settings.render_dir).expanduser() if settings.render_dir else config_dir() / "renders"
+            folder = base / f"anim-{time.strftime('%Y%m%d-%H%M%S')}"
+        folder.mkdir(parents=True, exist_ok=True)
+        ext = "." + image_format
+        files = {f: folder / f"{name}_{f:04d}{ext}" for f in frames}
+        if not resume:
+            taken = [p for p in files.values() if p.exists()]
+            if taken:
+                raise ToolError(f"{len(taken)} frames already exist in {folder}. Pass resume=true to keep "
+                                "them, or another out_dir.")
+        todo = [f for f in frames if not files[f].exists()]
+
+        used = await call("render_settings", _clean(width=width, height=height, max_samples=max_samples,
+                                                    max_time=max_time, quality=quality))
+
+        n_prev = min(previews, len(frames))
+        preview_frames = sorted({frames[round(i * (len(frames) - 1) / max(n_prev - 1, 1))]
+                                 for i in range(n_prev)})
+        captures = config_dir() / "captures"
+        captures.mkdir(parents=True, exist_ok=True)
+        preview_files: dict[int, Path] = {}
+
+        started = time.time()
+        seconds: list[float] = []
+        cam_used = camera
+        for i, f in enumerate(todo):
+            args = _clean(out_path=files[f].as_posix(), camera=camera, frame=f)
+            if f in preview_frames:
+                pv = captures / f"anim-preview-{int(time.time() * 1000)}-{f}.png"
+                args.update(preview_path=pv.as_posix(), preview_size=preview_size)
+            try:
+                res = await call("render", args, timeout=settings.render_timeout)
+            except ToolError as exc:
+                done = len(frames) - len(todo) + i
+                raise ToolError(f"Frame {f} failed: {exc} {done} of {len(frames)} frames are in {folder}; "
+                                "call render_animation again with this out_dir to continue.") from exc
+            seconds.append(float(res.get("seconds") or 0))
+            cam_used = res.get("camera") or cam_used
+            if res.get("preview"):
+                preview_files[f] = Path(res["preview"])
+            try:
+                await ctx.report_progress(i + 1, len(todo), f"frame {f} ({i + 1}/{len(todo)})")
+            except Exception:  # progress is optional; not every client asks for it
+                pass
+
+        result: dict[str, Any] = {
+            "folder": folder.as_posix(),
+            "frames": len(frames),
+            "first_frame": frames[0],
+            "last_frame": frames[-1],
+            "step": step,
+            "rendered": len(todo),
+            "kept": len(frames) - len(todo),
+            "files": f"{name}_####{ext}",
+            "camera": cam_used,
+            "seconds": round(time.time() - started, 1),
+            "seconds_per_frame": round(sum(seconds) / len(seconds), 1) if seconds else None,
+            "settings": used,
+            "video": None,
+        }
+        if video_format != "none":
+            vfps = fps or tl_fps / step
+            ffmpeg = video.find_ffmpeg(settings.extra.get("ffmpeg"))
+            if not ffmpeg:
+                result["video_error"] = ("No ffmpeg found (looked on PATH and in the Daz Studio folder). "
+                                         "Install ffmpeg or set \"ffmpeg\" in ~/.daz3d-mcp/settings.json.")
+            else:
+                out = folder / f"{name}.{video_format}"
+                try:
+                    await anyio.to_thread.run_sync(
+                        lambda: video.encode(ffmpeg, [files[f] for f in frames], out, vfps, video_format))
+                    result["video"] = out.as_posix()
+                    result["video_fps"] = round(vfps, 3)
+                    result["video_seconds"] = round(len(frames) / vfps, 2)
+                except video.VideoError as exc:
+                    result["video_error"] = str(exc)
+
+        content: list = []
+        for f in preview_frames:
+            shown = preview_files.get(f) or files[f]
+            suffix = shown.suffix.lower()
+            if shown.is_file() and shown.stat().st_size <= PREVIEW_MAX_BYTES and suffix in (".png", ".jpg", ".jpeg"):
+                content.append(f"frame {f}")
+                content.append(Image(data=shown.read_bytes(), format="png" if suffix == ".png" else "jpeg"))
         content.append(json.dumps(result))
         return content
 

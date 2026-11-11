@@ -45,6 +45,27 @@ renders small and short there unless the user asks otherwise.
 - Tell the user where the file is. Describe what the image really shows,
   including problems (noise, dark areas, clipping).
 
+## Rendering an animation
+
+`render_animation` renders every frame of the timeline range (or
+`start_frame`..`end_frame`) with Iray, saves `frame_0000.png`... in a folder
+and joins them into `frame.mp4` (`video_format="gif"` for a GIF, `"none"` for
+frames only). It uses ffmpeg from PATH or the one Daz Studio ships.
+
+- **Time:** about frames x `max_time` (plus a few seconds per frame to load
+  the scene into Iray). 120 frames at `max_time=30` is about an hour. Always
+  set `max_time`, tell the user the estimate and ask before anything over
+  about 10 minutes.
+- **Test first:** a few frames spread over the range (`step=10`, small size,
+  `max_time=10`) to check light, framing and motion. Then the final render.
+- **Noise flickers** between frames more than it shows in a still: give each
+  frame enough samples, or accept a little grain.
+- **Stopped or failed half way:** call it again with the same `out_dir`; it
+  keeps the frames already there (`resume=true`) and renders the rest.
+- The video plays at the timeline fps divided by `step` (`fps` to change it).
+  It returns a few frames as images and the folder and video paths: tell the
+  user where they are.
+
 ## Fixing common problems
 
 - **Too dark:** raise light `power` (lumens), add a fill light, or raise the
