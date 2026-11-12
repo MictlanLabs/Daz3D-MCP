@@ -1746,6 +1746,13 @@ DazMcp.fitCheck = function (fig, against, opts) {
 // character preset loads with a figure selected; answer it through the same
 // settings the dialog saves, and put the user's own choice back afterwards.
 // asPreset: true applies a character to the selected figure, false adds one.
+// Lets Daz handle queued events (deferred dialogs, fitting) before a tool returns.
+DazMcp.flushEvents = function (rounds) {
+	var i;
+	if (typeof processEvents !== "function") { return; }
+	for (i = 0; i < (rounds || 5); i++) { processEvents(); }
+};
+
 DazMcp.openContent = function (path, asPreset) {
 	var prefs = new DzAppSettings();
 	var oldShow = prefs.getStringValue("DSONCharacterShowLoadDlg", "");
@@ -1753,7 +1760,13 @@ DazMcp.openContent = function (path, asPreset) {
 	prefs.setStringValue("DSONCharacterShowLoadDlg", "false");
 	prefs.setStringValue("DSONCharacterLoadAsPreset", asPreset ? "true" : "false");
 	try {
-		return App.getContentMgr().openFile(path, true);
+		var ok = App.getContentMgr().openFile(path, true);
+		// Daz queues some questions about the loaded file, such as "Auto-Fit"
+		// for clothing made for another figure, and shows them only when the
+		// event loop next runs. Run it here, so the dialog opens during this
+		// call (and is reported as dialog_open) instead of blocking the next one.
+		DazMcp.flushEvents();
+		return ok;
 	} finally {
 		if (oldShow === "") { prefs.removeValue("DSONCharacterShowLoadDlg"); }
 		else { prefs.setStringValue("DSONCharacterShowLoadDlg", oldShow); }

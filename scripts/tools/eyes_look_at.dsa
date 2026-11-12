@@ -57,34 +57,84 @@ function aimError(bone, t) {
 	return [Math.atan2(ly, Math.sqrt(lx * lx + lz * lz)) * deg, Math.atan2(lx, lz) * deg];
 }
 
-// Newton steps on the bone's X and Y dials until its forward axis points at
-// the target (or the joint limits stop it). share < 1 turns only part way.
+// The value set on a dial. getValue() adds what other dials drive into it
+// (Genesis 9 eyes carry a built-in -3/+3 degree side-side offset), so setting
+// getValue() + step would lose that offset at every step.
+function rawOf(c) { return typeof c.getRawValue === "function" ? c.getRawValue() : c.getValue(); }
+
+function errSize(e) { return Math.sqrt(e[0] * e[0] + e[1] * e[1]); }
+
+// Damped Newton steps on the bone's X and Y dials until its forward axis
+// points at the target, or as close as the joint limits allow. Each step is
+// at most MAX_STEP degrees and is halved until it brings the axis closer, so a
+// step that runs into a joint limit cannot throw the eye the wrong way (it did
+// on Genesis 9 when the target was past the limit). share < 1 turns only part way.
+var MAX_STEP = 12;
+var GRID_STEP = 5;
+
+// Range a dial can take: its limits when it is clamped, else +-90 degrees.
+function dialRange(c) {
+	if (c.isClamped && c.isClamped()) { return [c.getMin(), c.getMax()]; }
+	return [-90, 90];
+}
+
+function coarseStart(bone, cx, cy, t) {
+	var rx = dialRange(cx), ry = dialRange(cy);
+	var best = [rawOf(cx), rawOf(cy)], bestErr = errSize(aimError(bone, t));
+	var gx, gy, e;
+	for (gx = rx[0]; gx <= rx[1] + 1e-6; gx += GRID_STEP) {
+		cx.setValue(gx);
+		for (gy = ry[0]; gy <= ry[1] + 1e-6; gy += GRID_STEP) {
+			cy.setValue(gy);
+			e = errSize(aimError(bone, t));
+			if (e < bestErr) { bestErr = e; best = [gx, gy]; }
+		}
+	}
+	return best;
+}
 function aim(bone, t, share) {
 	var cx = bone.getXRotControl(), cy = bone.getYRotControl();
-	var x0 = cx.getValue(), y0 = cy.getValue();
-	var it, e, ex, ey, J, det, dx, dy;
-	for (it = 0; it < 6; it++) {
-		e = aimError(bone, t);
+	var x0 = rawOf(cx), y0 = rawOf(cy);
+	var it, k, e, en, ex, ey, J, det, dx, dy, len, x, y, sx, sy, tried, vx, vy;
+	// Start from the best point of a coarse grid over the joint's range, so
+	// the Newton steps begin near the answer (from far away, with the dials
+	// held at a limit, they can head the wrong way).
+	var best = coarseStart(bone, cx, cy, t);
+	cx.setValue(best[0]);
+	cy.setValue(best[1]);
+	e = aimError(bone, t);
+	for (it = 0; it < 20; it++) {
 		if (Math.abs(e[0]) < 0.05 && Math.abs(e[1]) < 0.05) { break; }
-		var x = cx.getValue(), y = cy.getValue();
+		x = rawOf(cx); y = rawOf(cy);
 		// one degree each way, away from a joint limit (a clamped dial would not move)
-		var sx = 1, sy = 1;
-		cx.setValue(x + 1); if (Math.abs(cx.getValue() - x) < 0.5) { sx = -1; cx.setValue(x - 1); }
+		sx = 1; sy = 1;
+		vx = cx.getValue(); cx.setValue(x + 1); if (Math.abs(cx.getValue() - vx) < 0.5) { sx = -1; cx.setValue(x - 1); }
 		ex = aimError(bone, t); cx.setValue(x);
-		cy.setValue(y + 1); if (Math.abs(cy.getValue() - y) < 0.5) { sy = -1; cy.setValue(y - 1); }
+		vy = cy.getValue(); cy.setValue(y + 1); if (Math.abs(cy.getValue() - vy) < 0.5) { sy = -1; cy.setValue(y - 1); }
 		ey = aimError(bone, t); cy.setValue(y);
 		J = [[(ex[0] - e[0]) * sx, (ey[0] - e[0]) * sy], [(ex[1] - e[1]) * sx, (ey[1] - e[1]) * sy]];
 		det = J[0][0] * J[1][1] - J[0][1] * J[1][0];
 		if (Math.abs(det) < 1e-6) { break; }
 		dx = (-e[0] * J[1][1] + e[1] * J[0][1]) / det;
 		dy = (-e[1] * J[0][0] + e[0] * J[1][0]) / det;
-		cx.setValue(x + dx);
-		cy.setValue(y + dy);
-		if (Math.abs(cx.getValue() - (x + dx)) > 0.01 && Math.abs(cy.getValue() - (y + dy)) > 0.01) { break; }
+		len = Math.sqrt(dx * dx + dy * dy);
+		if (len > MAX_STEP) { dx *= MAX_STEP / len; dy *= MAX_STEP / len; }
+		tried = false;
+		for (k = 0; k < 6; k++) {
+			cx.setValue(x + dx);
+			cy.setValue(y + dy);
+			en = aimError(bone, t);
+			if (errSize(en) < errSize(e) - 1e-4) { tried = true; break; }
+			dx /= 2; dy /= 2;
+		}
+		if (!tried) { cx.setValue(x); cy.setValue(y); break; }
+		// at a joint limit the dial stops short; stop once nothing moves
+		if (Math.abs(cx.getValue() - vx) < 0.01 && Math.abs(cy.getValue() - vy) < 0.01) { e = en; break; }
+		e = en;
 	}
 	if (share < 1) {
-		cx.setValue(x0 + (cx.getValue() - x0) * share);
-		cy.setValue(y0 + (cy.getValue() - y0) * share);
+		cx.setValue(x0 + (rawOf(cx) - x0) * share);
+		cy.setValue(y0 + (rawOf(cy) - y0) * share);
 	}
 	e = aimError(bone, t);
 	return {
