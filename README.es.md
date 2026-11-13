@@ -11,12 +11,31 @@ ejecutar DazScript.
 > Proyecto open source independiente. No está afiliado ni respaldado por Daz 3D.
 > [Read in English](README.md)
 
-**Estado: v0.4 (etapa 4 de 4).** Funcionan escenas, biblioteca de contenido,
-personajes, cámaras, luces, materiales, render, assets de terceros (paquetes
-de otras tiendas, importar OBJ/FBX y convertir mallas importadas en ropa) y
-animación (keyframes, presets, importar BVH y FBX con mapa de huesos, reubicar
-y cambiar el ritmo). Las cuatro etapas están probadas contra un Daz Studio
-simulado; sus pruebas de cierre en un Daz Studio 6 real siguen pendientes.
+> **Fase temprana, en pruebas internas.** Versión 0.4. Todas las funciones de
+> abajo existen y pasan las pruebas contra un Daz Studio simulado, y se están
+> probando en un Daz Studio 6.26 real en Windows 11 con tarjetas gráficas AMD y
+> NVIDIA. Espera errores y cambios incompatibles, y no lo uses todavía para
+> trabajo de producción.
+
+## Requisitos y limitaciones conocidas
+
+- **Hace falta una GPU NVIDIA para sacarle todo el provecho.** Daz Studio está
+  hecho alrededor de NVIDIA Iray, que solo renderiza con tarjetas NVIDIA (y solo
+  si la escena cabe en la memoria de la tarjeta). Con una GPU AMD o Intel, Iray
+  renderiza con la CPU: mucho más lento, sin el denoiser con IA de Iray y con
+  grano salvo que esperes mucho (en nuestras pruebas una escena de interior
+  llegó a unas 310 de las 1,000 a 2,000 iteraciones que necesita en 25 minutos).
+  Una escena grande también puede quedarse sin memoria y congelar Daz Studio.
+  Esto afecta a `render`, `render_shots` y `render_animation`; todo lo demás
+  funciona con cualquier tarjeta gráfica.
+- **Solo Windows.** Por ahora no habrá versión para macOS: Daz Studio está
+  hecho principalmente para GPUs NVIDIA, y las Mac no pueden usarlas, así que
+  ahí Iray renderiza con la CPU.
+- **Aún no hay versión publicada.** No está en PyPI ni hay un release en GitHub
+  con el plugin compilado, así que `setup` no puede descargarlo: compílalo
+  ([bridge/README.md](bridge/README.md)) y pasa `--plugin-file`, o usa
+  `--no-plugin`.
+- Daz Studio 4.24 aún no está soportado.
 
 ## Cómo funciona
 

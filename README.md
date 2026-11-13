@@ -10,12 +10,30 @@ presets, Mixamo FBX and mocap BVH), and run DazScript.
 > Independent open source project. Not affiliated with or endorsed by Daz 3D.
 > [Leer en español](README.es.md)
 
-**Status: v0.4 (stage 4 of 4).** Scenes, content library, characters, cameras,
-lights, materials, rendering, third-party assets (store packages, OBJ/FBX
-import, turning imported meshes into clothing) and animation (keyframes,
-presets, BVH and FBX import with bone mapping, moving and retiming) work.
-All four stages are tested against a simulated Daz Studio; their closing
-tests on a real Daz Studio 6 are still pending.
+> **Early stage, internal testing.** Version 0.4. All the features below
+> exist and pass the tests against a simulated Daz Studio, and they are being
+> tested on a real Daz Studio 6.26 on Windows 11 with both AMD and NVIDIA
+> graphics cards. Expect bugs and breaking changes, and do not rely on it for
+> production work yet.
+
+## Requirements and known limits
+
+- **An NVIDIA GPU is needed to get everything out of it.** Daz Studio is built
+  around NVIDIA Iray, which only renders on NVIDIA cards (and only when the
+  scene fits in the card's memory). With an AMD or Intel GPU, Iray renders on
+  the CPU: much slower, without Iray's AI denoiser, and grainy unless you wait a
+  long time (in our tests an interior scene reached about 310 of the 1,000 to
+  2,000 iterations it needs in 25 minutes). A big scene can also run out of
+  memory and hang Daz Studio. This affects `render`, `render_shots` and
+  `render_animation`; everything else works with any graphics card.
+- **Windows only.** No macOS version is planned for now: Daz Studio is mainly
+  made for NVIDIA GPUs, and Macs cannot use them, so Iray renders on the CPU
+  there.
+- **No release yet.** It is not on PyPI and there is no GitHub release with the
+  compiled plugin, so `setup` cannot download it: build it
+  ([bridge/README.md](bridge/README.md)) and pass `--plugin-file`, or use
+  `--no-plugin`.
+- Daz Studio 4.24 is not supported yet.
 
 ## How it works
 
