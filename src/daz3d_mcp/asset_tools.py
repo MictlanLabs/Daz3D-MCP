@@ -155,7 +155,9 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient], forg
         path: Annotated[str, Field(description="Absolute path of an .obj or .fbx file.")],
     ) -> dict:
         """Reads an OBJ or FBX without importing it: size in file units, the units it most likely uses,
-        surfaces, textures found and missing, whether it is rigged or animated."""
+        surfaces, textures found and missing, whether it is rigged or animated. For FBX, bbox_cm is the
+        size Daz will give it, with the object scale and rotation the file keeps (Blender's unapplied
+        transforms); suggested_scale appears when that size is not believable."""
         p = _abs(path)
         try:
             info = await anyio.to_thread.run_sync(lambda: meshes.inspect_mesh(p))
@@ -182,36 +184,64 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient], forg
         position: Annotated[Vec3 | None, Field(description="[x, y, z] cm.")] = None,
         drop_to_floor: Annotated[bool, Field(description="Put its lowest point on the floor. Leave off for "
                                                          "clothing modeled around a figure.")] = False,
-        take: Annotated[str | None, Field(description="FBX: animation take to import.")] = None,
+        room: Annotated[bool, Field(description="A room or set: drop_to_floor stands its floor (the largest "
+                                                "level surface) on Y = 0, not its lowest point, which is often "
+                                                "ground or scenery outside.")] = False,
+        take:Annotated[str | None, Field(description="FBX: animation take to import.")] = None,
+        scale: Annotated[float | None, Field(gt=0, description="Multiply its size by this, e.g. 0.1 when "
+                                                               "mesh_inspect or a first import says it is 10x too "
+                                                               "big.")] = None,
+        glass: Annotated[bool, Field(description="Make the surfaces the file marks see-through (windows, "
+                                                 "glasses) clear Iray glass.")] = True,
+        keep_empties: Annotated[bool, Field(description="Keep the camera, light and empty nodes a Blender "
+                                                        "export brings along.")] = False,
         options: Annotated[dict[str, Any] | None, Field(description="Extra importer settings (advanced).")] = None,
     ) -> dict:
         """Imports a loose OBJ or FBX model (Sketchfab, CGTrader, Blender, a package's meshes) into the
         scene with the right size, without the importer dialog. Returns the new node, its size in cm
-        and its surfaces. Clothing modeled for a figure then goes through wearable_from_mesh."""
+        and its surfaces. Clothing modeled for a figure then goes through wearable_from_mesh. For FBX, leave
+        units on auto: the file states its units, and Blender keeps the meters-to-cm factor in the object
+        scale."""
         p = _abs(path)
         info: dict = {}
         try:
             info = await anyio.to_thread.run_sync(lambda: meshes.inspect_mesh(p))
-            scale, used, why = meshes.import_scale(info, units)
+            file_scale, used, why = meshes.import_scale(info, units)
         except meshes.MeshError as exc:
             if units == "auto" or not p.is_file() or p.suffix.lower() not in (".obj", ".fbx"):
                 raise ToolError(str(exc)) from exc
-            scale, used, why = meshes.UNITS_CM[units], units, "given"
+            file_scale, used, why = meshes.UNITS_CM[units], units, "given"
         fmt = p.suffix.lower().lstrip(".")
         post_scale = None
-        if fmt == "fbx" and units != "auto":
-            file_unit = ((info.get("units_in_file") or {}).get("cm_per_unit")) or 1.0
-            post_scale = meshes.UNITS_CM[units] / file_unit
-            scale = None
+        notes: list[str] = []
+        if fmt == "fbx":
+            file_units = info.get("units_in_file") or {}
+            if units != "auto" and units != file_units.get("name"):
+                post_scale = meshes.UNITS_CM[units] / (file_units.get("cm_per_unit") or 1.0)
+                notes.append(f"The FBX says it is in {file_units.get('name') or 'cm'}; units={units} scaled it "
+                             f"{post_scale:g}x on top of that. Blender files keep the meters-to-cm factor in the "
+                             "object scale, so leave units on auto for them.")
+            post_scale = (post_scale or 1.0) * (scale or 1.0)
+            if post_scale == 1.0:
+                post_scale = None
+            obj_scale = None
+        else:
+            obj_scale = file_scale * (scale or 1.0)
+        glass_list = sorted(set(info.get("transparent_surfaces") or [])) if glass else []
         result = await call("import_mesh", _clean(
-            path=p.as_posix(), format=fmt, scale_cm=scale if fmt == "obj" else None,
+            path=p.as_posix(), format=fmt, scale_cm=obj_scale,
             up_axis=up_axis if fmt == "obj" else None, post_scale=post_scale, height=height, label=label,
-            position=position, drop_to_floor=drop_to_floor, take=take, options=options))
+            position=position, drop_to_floor=drop_to_floor, room=room or None, take=take, options=options,
+            drop_empties=not keep_empties, glass=glass_list or None))
         result["units"] = used
         result["units_why"] = why
         if info:
             result["file"] = {k: info.get(k) for k in ("vertices", "rigged", "animated", "missing_textures")}
-            result["warnings"] = list(info.get("warnings", [])) + list(result.get("warnings", []))
+            # The size advice from the file is replaced by the one on the imported result.
+            before = [w for w in info.get("warnings", []) if not w.startswith("It comes in ")
+                      and not (w.startswith("It also holds") and not keep_empties)
+                      and not (w.startswith("Surfaces ") and glass)]
+            result["warnings"] = before + notes + list(result.get("warnings", []))
         return result
 
     @mcp.tool(annotations=CHANGES_SCENE)

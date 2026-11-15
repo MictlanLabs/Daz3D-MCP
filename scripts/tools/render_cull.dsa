@@ -1,0 +1,681 @@
+// Tool: render_cull
+// Works out what a camera sees and takes the rest out of the render (the
+// node's "Visible in Render" switch), so Iray loads less geometry and fewer
+// textures. The viewport and "Visible" stay as they are, so the scene looks
+// the same while you work and the change is easy to undo.
+//
+// Three kinds of node are dropped:
+//   out_of_frame  its bounding box is outside the picture (or behind the
+//                 camera) at every frame asked for
+//   covered       a worn item (underwear under a long skirt, a shirt under a
+//                 closed coat) that other opaque clothing of the same figure
+//                 hides from the camera, tested on a small depth buffer
+//   shell         a geometry shell (toon outline...) of a dropped node
+// Out-of-frame nodes are kept when they still change the picture: they hold
+// the light in (walls, a ceiling, anything around the camera), stand between
+// a light and what is seen, sit close to what is seen (contact shadows, bounce
+// light), glow, or a mirror is in view.
+//
+// args:
+//   action        "check" (report only, default) | "hide" | "set"
+//   camera        camera label; default the viewport camera
+//   frames        [int] timeline frames to test (the union is kept); default
+//                 the current frame
+//   occlusion     "worn" (default) | "none": also drop covered worn items
+//   keep          [label] never drop these (a figure keeps what it wears)
+//   shadow_margin cm (default 30): keep out-of-frame nodes this close to the
+//                 picture (contact shadows, bounce light at the edges)
+//   frame_margin  share of the picture added on every side (default 0.05)
+//   resolution    depth buffer width in pixels (default 400)
+//   depth_margin  cm (default 0.3): how far behind other clothing a worn item
+//                 must be to count as covered
+//   max_facets    most facets of clothing to rasterize per figure (default 400000)
+//   ignore_reflections  (bool) drop out-of-frame nodes even with a mirror in view
+//   detail        (bool) list every node with its status
+// "set" action:
+//   ids           [{id, label}] nodes to change
+//   visible       (bool) the "Visible in Render" value to set
+
+var NEAR = 1;            // cm in front of the lens
+var BIG = 200;           // a box this large (cm) in two directions is a wall, floor or ceiling
+var BIG_REACH = 1000;    // ...and is kept when this close to the camera or what is seen
+
+function v3(p) { return [p.x, p.y, p.z]; }
+function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+
+function renderVisible(n) {
+	try { return !!n.isVisibleInRender(); } catch (e) { /* older API */ }
+	var p = DazMcp.findProp(n, ["Visible in Render"]);
+	return p ? !!p.getValue() : true;
+}
+
+function setRenderVisible(n, on) {
+	try { n.setVisibleInRender(on); return; } catch (e) { /* property below */ }
+	var p = DazMcp.findProp(n, ["Visible in Render"]);
+	if (!p) { throw DazMcp.fail("unsupported", n.getLabel() + " has no Visible in Render switch."); }
+	p.setValue(on ? 1 : 0);
+}
+
+function castsShadow(n) {
+	try { return n.castsShadow() !== false; } catch (e) { return true; }
+}
+
+// --------------------------------------------------------------- camera ----
+function cameraOf(args) {
+	var v3d = DazMcp.viewport3d();
+	var cam;
+	if (args.camera) {
+		cam = DazMcp.requireNode(args.camera, "camera");
+		if (DazMcp.nodeType(cam) !== "camera") { throw DazMcp.fail("bad_args", args.camera + " is not a camera."); }
+		return cam;
+	}
+	cam = v3d ? v3d.getCamera() : null;
+	if (!cam) { throw DazMcp.fail("bad_args", "No camera given and the viewport has none."); }
+	return cam;
+}
+
+// The camera's frame in world space now: position, axes and the half
+// extents of the picture per cm of distance (tx, ty), widened by margin.
+function viewOf(cam, aspect, margin) {
+	var R = cam.getWSRot();
+	var fw = 36;
+	var p = DazMcp.findProp(cam, ["Frame Width (mm)", "Frame Width"]);
+	if (p && p.getValue() > 0) { fw = p.getValue(); }
+	var f = DazMcp.getFocalLength(cam);
+	var tx = (fw / 2) / f * (1 + 2 * margin);
+	return {
+		P: v3(cam.getWSPos()),
+		right: v3(R.multVec(new DzVec3(1, 0, 0))),
+		up: v3(R.multVec(new DzVec3(0, 1, 0))),
+		back: v3(R.multVec(new DzVec3(0, 0, 1))),
+		tx: tx,
+		ty: (fw / 2) / (aspect * f) * (1 + 2 * margin)
+	};
+}
+
+// [x, y, d]: right, up and distance in front of the lens.
+function toCam(V, x, y, z) {
+	var dx = x - V.P[0], dy = y - V.P[1], dz = z - V.P[2];
+	return [dx * V.right[0] + dy * V.right[1] + dz * V.right[2],
+		dx * V.up[0] + dy * V.up[1] + dz * V.up[2],
+		-(dx * V.back[0] + dy * V.back[1] + dz * V.back[2])];
+}
+
+// True when the box is wholly outside one side of the picture's pyramid.
+function boxOutside(V, b) {
+	var i, c, x, y, z;
+	var out = [0, 0, 0, 0, 0];
+	for (i = 0; i < 8; i++) {
+		x = i & 1 ? b.max[0] : b.min[0];
+		y = i & 2 ? b.max[1] : b.min[1];
+		z = i & 4 ? b.max[2] : b.min[2];
+		c = toCam(V, x, y, z);
+		if (c[2] < NEAR) { out[0]++; }
+		if (c[0] > V.tx * c[2]) { out[1]++; }
+		if (c[0] < -V.tx * c[2]) { out[2]++; }
+		if (c[1] > V.ty * c[2]) { out[3]++; }
+		if (c[1] < -V.ty * c[2]) { out[4]++; }
+	}
+	for (i = 0; i < 5; i++) { if (out[i] === 8) { return true; } }
+	return false;
+}
+
+// How far (cm, at least) the box is from the picture's pyramid: the most it
+// lies past any one side of it.
+function frustumGap(V, b) {
+	var sx = Math.sqrt(1 + V.tx * V.tx), sy = Math.sqrt(1 + V.ty * V.ty);
+	var worst = [1e30, 1e30, 1e30, 1e30, 1e30];
+	var i, c, x, y, z, best = -1e30;
+	for (i = 0; i < 8; i++) {
+		x = i & 1 ? b.max[0] : b.min[0];
+		y = i & 2 ? b.max[1] : b.min[1];
+		z = i & 4 ? b.max[2] : b.min[2];
+		c = toCam(V, x, y, z);
+		worst[0] = Math.min(worst[0], NEAR - c[2]);
+		worst[1] = Math.min(worst[1], (c[0] - V.tx * c[2]) / sx);
+		worst[2] = Math.min(worst[2], (-c[0] - V.tx * c[2]) / sx);
+		worst[3] = Math.min(worst[3], (c[1] - V.ty * c[2]) / sy);
+		worst[4] = Math.min(worst[4], (-c[1] - V.ty * c[2]) / sy);
+	}
+	for (i = 0; i < 5; i++) { best = Math.max(best, worst[i]); }
+	return best;
+}
+
+function boxOf(n) {
+	var b;
+	try { b = n.getWSBoundingBox(); } catch (e) { return null; }
+	if (!b || (b.isValid && !b.isValid()) || !b.min) { return null; }
+	return { min: [b.min.x - 1, b.min.y - 1, b.min.z - 1], max: [b.max.x + 1, b.max.y + 1, b.max.z + 1] };
+}
+
+function boxGap(a, b) {
+	var d = 0, i, g;
+	for (i = 0; i < 3; i++) {
+		g = Math.max(a.min[i] - b.max[i], b.min[i] - a.max[i], 0);
+		d += g * g;
+	}
+	return Math.sqrt(d);
+}
+
+function inBox(b, p, pad) {
+	return p[0] >= b.min[0] - pad && p[0] <= b.max[0] + pad && p[1] >= b.min[1] - pad && p[1] <= b.max[1] + pad &&
+		p[2] >= b.min[2] - pad && p[2] <= b.max[2] + pad;
+}
+
+function isBig(b) {
+	var n = 0, i;
+	for (i = 0; i < 3; i++) { if (b.max[i] - b.min[i] >= BIG) { n++; } }
+	return n >= 2;
+}
+
+function center(b) { return [(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2, (b.min[2] + b.max[2]) / 2]; }
+
+// Does the segment a-b pass through the box? (slab test)
+function segHitsBox(a, b, box) {
+	var t0 = 0, t1 = 1, i, d, inv, ta, tb, s;
+	for (i = 0; i < 3; i++) {
+		d = b[i] - a[i];
+		if (Math.abs(d) < 1e-9) {
+			if (a[i] < box.min[i] || a[i] > box.max[i]) { return false; }
+			continue;
+		}
+		inv = 1 / d;
+		ta = (box.min[i] - a[i]) * inv;
+		tb = (box.max[i] - a[i]) * inv;
+		if (ta > tb) { s = ta; ta = tb; tb = s; }
+		if (ta > t0) { t0 = ta; }
+		if (tb < t1) { t1 = tb; }
+		if (t0 > t1) { return false; }
+	}
+	return true;
+}
+
+// ------------------------------------------------------------ surfaces ----
+function numVal(m, labels) {
+	var p = DazMcp.findProp(m, labels);
+	if (!p) { return null; }
+	try { return p.getValue(); } catch (e) { return null; }
+}
+
+function hasMap(m, labels) {
+	var p = DazMcp.findProp(m, labels);
+	return p ? !!DazMcp.mapPath(p) : false;
+}
+
+// What the surfaces of a node do: which are see-through (they cannot cover
+// anything), whether it glows or is a mirror or glass, and its image files.
+function surfacesOf(n) {
+	var out = { clear: [], emits: false, mirror: false, glass: false, maps: {} };
+	var shape, i, j, m, c, cut, lum, metal, rough, refr, np, p, f;
+	try { shape = n.getObject().getCurrentShape(); } catch (e) { shape = null; }
+	if (!shape) { return out; }
+	for (i = 0; i < shape.getNumMaterials(); i++) {
+		m = shape.getMaterial(i);
+		cut = numVal(m, ["Cutout Opacity", "Opacity Strength"]);
+		refr = numVal(m, ["Refraction Weight", "Transmission"]);
+		out.clear.push((cut !== null && cut < 0.98) || hasMap(m, ["Cutout Opacity", "Opacity Strength"]) ||
+			(refr !== null && refr > 0.01));
+		if (refr !== null && refr > 0.5 && !hasMap(m, ["Cutout Opacity", "Opacity Strength"])) { out.glass = true; }
+		p = DazMcp.findProp(m, ["Emission Color"]);
+		if (p) {
+			c = DazMcp.colorToArray(p.getColorValue());
+			lum = numVal(m, ["Luminance"]);
+			if ((c && c[0] + c[1] + c[2] > 0.02) || DazMcp.mapPath(p)) {
+				if (lum === null || lum > 0) { out.emits = true; }
+			}
+		}
+		metal = numVal(m, ["Metallic Weight", "Metallicity"]);
+		rough = numVal(m, ["Glossy Roughness", "Roughness"]);
+		if (metal !== null && metal >= 0.9 && rough !== null && rough <= 0.15) { out.mirror = true; }
+		try { np = m.getNumProperties(); } catch (e2) { np = 0; }
+		for (j = 0; j < np; j++) {
+			p = m.getProperty(j);
+			try { if (!p.isMappable || !p.isMappable()) { continue; } } catch (e3) { continue; }
+			f = DazMcp.mapPath(p);
+			if (f) { out.maps[f] = true; }
+		}
+	}
+	return out;
+}
+
+// --------------------------------------------------------- depth buffer ----
+// A tiny z-buffer that remembers, per pixel, the nearest depth (d1) and which
+// node it belongs to (id1), and the nearest depth of any other node (d2), so a
+// node can be tested against everything but itself.
+function Raster(V, W, H) {
+	var n = W * H, i;
+	this.V = V;
+	this.W = W;
+	this.H = H;
+	this.d1 = [];
+	this.d2 = [];
+	this.id1 = [];
+	for (i = 0; i < n; i++) { this.d1.push(1e30); this.d2.push(1e30); this.id1.push(-1); }
+}
+
+// Screen x, y and 1/depth of every vertex; bad[i] when it is behind the lens.
+Raster.prototype.project = function (g) {
+	var V = this.V, W = this.W, H = this.H;
+	var nv = g.getNumVertices();
+	var P = { x: [], y: [], w: [], bad: [] };
+	var i, v, c;
+	for (i = 0; i < nv; i++) {
+		v = g.getVertex(i);
+		c = toCam(V, v.x, v.y, v.z);
+		if (c[2] < NEAR) { P.x.push(0); P.y.push(0); P.w.push(0); P.bad.push(true); continue; }
+		P.x.push((c[0] / (c[2] * V.tx) * 0.5 + 0.5) * W);
+		P.y.push((0.5 - c[1] / (c[2] * V.ty) * 0.5) * H);
+		P.w.push(1 / c[2]);
+		P.bad.push(false);
+	}
+	return P;
+};
+
+// mode "add": write the triangle into the buffer as node id.
+// mode "test": true when some pixel of it is not behind other nodes.
+Raster.prototype.tri = function (P, a, b, c, id, test, margin) {
+	var W = this.W, H = this.H;
+	var ax = P.x[a], ay = P.y[a], bx = P.x[b], by = P.y[b], cx = P.x[c], cy = P.y[c];
+	var area, x0, x1, y0, y1, px, py, qx, qy, l0, l1, l2, d, k, occ, any = false;
+	if (P.bad[a] || P.bad[b] || P.bad[c]) { return test; }  // crosses the lens: count it as seen
+	area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+	x0 = Math.max(0, Math.floor(Math.min(ax, bx, cx)));
+	x1 = Math.min(W - 1, Math.ceil(Math.max(ax, bx, cx)));
+	y0 = Math.max(0, Math.floor(Math.min(ay, by, cy)));
+	y1 = Math.min(H - 1, Math.ceil(Math.max(ay, by, cy)));
+	if (x0 > x1 || y0 > y1) { return false; }  // outside the picture
+	this.touched = true;
+	if (Math.abs(area) > 1e-9) {
+		for (py = y0; py <= y1; py++) {
+			qy = py + 0.5;
+			for (px = x0; px <= x1; px++) {
+				qx = px + 0.5;
+				l0 = ((bx - qx) * (cy - qy) - (by - qy) * (cx - qx)) / area;
+				l1 = ((cx - qx) * (ay - qy) - (cy - qy) * (ax - qx)) / area;
+				l2 = 1 - l0 - l1;
+				if (l0 < 0 || l1 < 0 || l2 < 0) { continue; }
+				any = true;
+				d = 1 / (l0 * P.w[a] + l1 * P.w[b] + l2 * P.w[c]);
+				k = py * W + px;
+				if (test) {
+					occ = this.id1[k] === id ? this.d2[k] : this.d1[k];
+					if (d <= occ + margin) { return true; }
+				} else if (d < this.d1[k]) {
+					if (this.id1[k] !== id) { this.d2[k] = this.d1[k]; }
+					this.d1[k] = d;
+					this.id1[k] = id;
+				} else if (this.id1[k] !== id && d < this.d2[k]) {
+					this.d2[k] = d;
+				}
+			}
+		}
+	}
+	if (any || !test) { return false; }
+	// smaller than a pixel: test the pixel under its middle
+	qx = (ax + bx + cx) / 3;
+	qy = (ay + by + cy) / 3;
+	if (qx < 0 || qy < 0 || qx >= W || qy >= H) { return false; }
+	k = Math.floor(qy) * W + Math.floor(qx);
+	d = 3 / (P.w[a] + P.w[b] + P.w[c]);
+	occ = this.id1[k] === id ? this.d2[k] : this.d1[k];
+	return d <= occ + margin;
+};
+
+// Runs fn(a, b, c, materialIndex) on each triangle of a mesh.
+function eachTri(g, fn) {
+	var nf = g.getNumFacets ? g.getNumFacets() : 0;
+	var i, f, q, m;
+	for (i = 0; i < nf; i++) {
+		f = g.getFacet(i);
+		m = f.materialIndex === undefined ? 0 : f.materialIndex;
+		q = f.vertIdx4;
+		if (fn(f.vertIdx1, f.vertIdx2, f.vertIdx3, m)) { return true; }
+		if (q !== undefined && q !== null && q >= 0 && fn(f.vertIdx1, f.vertIdx3, q, m)) { return true; }
+	}
+	return false;
+}
+
+// ------------------------------------------------------------- scene ----
+function rootFigure(n) {
+	var t = null, guard = 0, cur = n;
+	while (guard++ < 20) {
+		try { t = cur.getFollowTarget ? cur.getFollowTarget() : null; } catch (e) { t = null; }
+		if (!t) { break; }
+		cur = t;
+	}
+	return DazMcp.same(cur, n) ? null : cur;
+}
+
+function shellTarget(n) {
+	try { if (DazMcp.className(n) === "DzGeometryShellNode" && n.getTarget) { return n.getTarget(); } } catch (e) { /* none */ }
+	return null;
+}
+
+function hasGeometry(n) {
+	var cls = DazMcp.className(n);
+	if (cls === "DzInstanceNode") { return true; }
+	try { return !!(n.getObject && n.getObject()); } catch (e) { return false; }
+}
+
+function facetCount(n) {
+	var g = null;
+	try { g = n.getObject().getCachedGeom(); } catch (e) { g = null; }
+	if (!g) { return { facets: 0, verts: 0 }; }
+	return { facets: g.getNumFacets ? g.getNumFacets() : 0, verts: g.getNumVertices() };
+}
+
+function lightsOf() {
+	var all = Scene.getNodeList();
+	var out = [], i, n, mode, R;
+	for (i = 0; i < all.length; i++) {
+		n = all[i];
+		if (DazMcp.nodeType(n) !== "light" || !n.isVisible()) { continue; }
+		mode = DazMcp.findProp(n, ["Illumination"]);
+		if (mode) {
+			try { if (DazMcp.lower(mode.getStringValue()).indexOf("on") !== 0 || /no shadow/i.test(mode.getStringValue())) { continue; } } catch (e) { /* assume on */ }
+		}
+		R = n.getWSRot();
+		out.push({ distant: DazMcp.className(n) === "DzDistantLight", P: v3(n.getWSPos()),
+			dir: v3(R.multVec(new DzVec3(0, 0, -1))) });
+	}
+	return out;
+}
+
+function keepSet(labels) {
+	var keep = {}, i, n, f, j;
+	for (i = 0; i < (labels || []).length; i++) {
+		n = DazMcp.requireNode(labels[i], "keep");
+		keep[DazMcp.idOf(n)] = true;
+		f = DazMcp.followers(n);
+		for (j = 0; j < f.length; j++) { keep[DazMcp.idOf(f[j])] = true; }
+	}
+	return keep;
+}
+
+// ----------------------------------------------------------- analysis ----
+function analyze(args) {
+	var cam = cameraOf(args);
+	var aspect = DazMcp.renderAspect();
+	var margin = typeof args.frame_margin === "number" ? args.frame_margin : 0.05;
+	var shadowMargin = typeof args.shadow_margin === "number" ? args.shadow_margin : 30;
+	var depthMargin = typeof args.depth_margin === "number" ? args.depth_margin : 0.3;
+	var resW = Math.max(32, Math.min(2000, args.resolution || 400));
+	var resH = Math.max(16, Math.round(resW / aspect));
+	var maxFacets = args.max_facets || 400000;
+	var occlusion = args.occlusion !== "none";
+	var keep = keepSet(args.keep);
+	var frames = args.frames && args.frames.length ? args.frames : [Scene.getFrame()];
+	var startFrame = Scene.getFrame();
+	var warnings = [];
+	var all = Scene.getNodeList();
+	var nodes = [], shells = [], byId = {};
+	var i, j, k, n, t, e, fi, V, lights, seen, groups, root, g, key;
+
+	for (i = 0; i < all.length; i++) {
+		n = all[i];
+		t = DazMcp.nodeType(n);
+		if (t === "bone" || t === "camera" || t === "light" || t === "group" || !hasGeometry(n)) { continue; }
+		e = { node: n, id: DazMcp.idOf(n), label: String(n.getLabel()), type: t, seen: false, inBox: false,
+			reason: null, surf: null, root: null };
+		if (!n.isVisible() || !renderVisible(n)) { e.status = "already_hidden"; }
+		e.root = t === "fitted_figure" ? rootFigure(n) : null;
+		if (shellTarget(n)) { e.shellOf = DazMcp.idOf(shellTarget(n)); shells.push(e); }
+		nodes.push(e);
+		byId[e.id] = e;
+	}
+	for (i = 0; i < nodes.length; i++) {
+		e = nodes[i];
+		if (e.status === "already_hidden") { continue; }
+		e.surf = surfacesOf(e.node);
+		e.size = facetCount(e.node);
+	}
+
+	for (fi = 0; fi < frames.length; fi++) {
+		if (Scene.getFrame() !== frames[fi]) { Scene.setFrame(frames[fi]); }
+		V = viewOf(cam, aspect, margin);
+		lights = lightsOf();
+		seen = [];
+		groups = {};
+		for (i = 0; i < nodes.length; i++) {
+			e = nodes[i];
+			if (e.status === "already_hidden" || e.shellOf) { continue; }
+			e.box = boxOf(e.node);
+			e.frameIn = !e.box || !boxOutside(V, e.box);
+			if (!e.frameIn) { continue; }
+			// worn items go to the depth test; strand hair (no facets) cannot be tested
+			if (occlusion && e.root && e.size.facets > 0) {
+				key = DazMcp.idOf(e.root);
+				if (!groups[key]) { groups[key] = []; }
+				groups[key].push(e);
+				continue;
+			}
+			e.inBox = true;
+			e.seen = true;
+			e.seenNow = true;
+			seen.push(e);
+		}
+		for (key in groups) {
+			if (groups.hasOwnProperty(key)) { coverTest(groups[key], V, resW, resH, depthMargin, maxFacets, warnings, seen); }
+		}
+		protect(nodes, seen, V, lights, shadowMargin, keep);
+		for (i = 0; i < nodes.length; i++) { nodes[i].seenNow = false; }
+	}
+	if (Scene.getFrame() !== startFrame) { Scene.setFrame(startFrame); }
+
+	// shells follow what they outline
+	for (i = 0; i < shells.length; i++) {
+		e = shells[i];
+		if (e.status === "already_hidden") { continue; }
+		t = byId[e.shellOf];
+		if (t && t.status !== "already_hidden") { e.seen = t.seen; e.inBox = t.inBox; e.keepWhy = t.keepWhy; }
+		else { e.seen = true; }
+	}
+
+	var mirrors = [], glass = [];
+	for (i = 0; i < nodes.length; i++) {
+		e = nodes[i];
+		if (!e.seen || !e.surf) { continue; }
+		if (e.surf.mirror) { mirrors.push(e.label); }
+		if (e.surf.glass) { glass.push(e.label); }
+	}
+	if (mirrors.length && args.ignore_reflections !== true) {
+		warnings.push("A mirror-like surface is in view (" + mirrors.slice(0, 5).join(", ") + "): nothing out of " +
+			"frame is dropped, since it may show in it. Pass ignore_reflections=true when it cannot.");
+	}
+	if (glass.length) {
+		warnings.push("Glass is in view (" + glass.slice(0, 5).join(", ") + "): it reflects a little of the " +
+			"room behind the camera; check a test render if that matters.");
+	}
+
+	for (i = 0; i < nodes.length; i++) {
+		e = nodes[i];
+		if (e.status === "already_hidden") { continue; }
+		if (e.seen) { e.status = "in_view"; continue; }
+		if (keep[e.id]) { e.status = "kept"; e.reason = "keep"; continue; }
+		if (e.inBox) {  // in the frame but covered: its own shadow stays under the clothes
+			e.status = "covered";
+			continue;
+		}
+		if (mirrors.length && args.ignore_reflections !== true) { e.status = "kept"; e.reason = "mirror_in_view"; continue; }
+		if (e.keepWhy) { e.status = "kept"; e.reason = e.keepWhy; continue; }
+		e.status = "out_of_frame";
+	}
+	return { camera: cam, nodes: nodes, frames: frames, warnings: warnings, aspect: aspect, res: [resW, resH] };
+}
+
+// Clothing and other things worn by one figure: which are covered by the
+// others. Items it finds seen go into `seen`.
+function coverTest(items, V, W, H, margin, maxFacets, warnings, seen) {
+	var total = 0, i, g, R, list = [], it, P;
+	for (i = 0; i < items.length; i++) { total += items[i].size.facets; }
+	if (total > maxFacets) {
+		warnings.push("Skipped the covered-clothing test on " + String(items[0].root.getLabel()) + ": " + total +
+			" facets is more than max_facets.");
+		for (i = 0; i < items.length; i++) {
+			items[i].inBox = true;
+			items[i].seen = true;
+			items[i].seenNow = true;
+			seen.push(items[i]);
+		}
+		return;
+	}
+	R = new Raster(V, W, H);
+	for (i = 0; i < items.length; i++) {
+		g = DazMcp.cachedMesh(items[i].node);
+		if (!g) { continue; }
+		P = R.project(g);
+		list.push({ e: items[i], g: g, P: P, n: i });
+	}
+	// opaque surfaces of every worn item cover what is behind them
+	for (i = 0; i < list.length; i++) {
+		it = list[i];
+		if (DazMcp.wearableKind(it.e.node) === "hair") { continue; }
+		eachTri(it.g, function (a, b, c, m) {
+			if (it.e.surf.clear[m]) { return false; }
+			R.tri(it.P, a, b, c, it.n, false, margin);
+			return false;
+		});
+	}
+	for (i = 0; i < list.length; i++) {
+		it = list[i];
+		R.touched = false;
+		if (eachTri(it.g, function (a, b, c) { return R.tri(it.P, a, b, c, it.n, true, margin); })) {
+			it.e.inBox = true;
+			it.e.seen = true;
+			it.e.seenNow = true;
+			seen.push(it.e);
+		} else if (R.touched) {
+			it.e.inBox = true;     // in the picture, but behind other clothes
+		} else {
+			it.e.frameIn = false;  // its box reaches into the picture, its mesh does not
+		}
+	}
+	for (i = 0; i < items.length; i++) {
+		if (!items[i].seen && !DazMcp.cachedMesh(items[i].node)) {
+			items[i].inBox = true;
+			items[i].seen = true;
+			seen.push(items[i]);
+		}
+	}
+}
+
+// Out-of-frame nodes that still change the picture, at this frame.
+function protect(nodes, seen, V, lights, shadowMargin, keep) {
+	var subjects = [], i, j, l, e, s, a, b, why;
+	for (i = 0; i < seen.length; i++) {
+		s = seen[i];
+		if (!s.box || inBox(s.box, V.P, 10) || isBig(s.box)) { continue; }  // the room or the ground itself
+		subjects.push(s);
+	}
+	subjects.sort(function (x, y) { return boxGap(x.box, { min: V.P, max: V.P }) - boxGap(y.box, { min: V.P, max: V.P }); });
+	subjects = subjects.slice(0, 60);
+	for (i = 0; i < nodes.length; i++) {
+		e = nodes[i];
+		if (e.status === "already_hidden" || e.seenNow || e.shellOf || e.keepWhy || !e.box) { continue; }
+		if (e.frameIn) { continue; }  // in frame now: covered or seen, handled elsewhere
+		why = null;
+		if (inBox(e.box, V.P, 10)) { why = "around_camera"; }
+		if (!why && e.surf && e.surf.emits) { why = "emits_light"; }
+		if (!why && isBig(e.box)) {
+			if (boxGap(e.box, { min: V.P, max: V.P }) < BIG_REACH) { why = "holds_light_in"; }
+			for (j = 0; !why && j < subjects.length; j++) {
+				if (boxGap(e.box, subjects[j].box) < BIG_REACH) { why = "holds_light_in"; }
+			}
+		}
+		if (!why && frustumGap(V, e.box) < shadowMargin) { why = "near_view"; }
+		if (!why && castsShadow(e.node)) {
+			for (l = 0; !why && l < lights.length; l++) {
+				for (j = 0; !why && j < subjects.length; j++) {
+					b = center(subjects[j].box);
+					a = lights[l].distant ? [b[0] - lights[l].dir[0] * 10000, b[1] - lights[l].dir[1] * 10000,
+						b[2] - lights[l].dir[2] * 10000] : lights[l].P;
+					if (segHitsBox(a, b, e.box)) { why = "light_path"; }
+				}
+			}
+		}
+		if (why) { e.keepWhy = why; }
+	}
+}
+
+// ------------------------------------------------------------- report ----
+function report(A, hidden, detail) {
+	var out = { camera: String(A.camera.getLabel()), frames: A.frames, buffer: A.res };
+	var counts = { in_view: 0, out_of_frame: 0, covered: 0, kept: 0, already_hidden: 0 };
+	var drop = [], kept = [], list = [];
+	var fTotal = 0, fDrop = 0, mapsKept = {}, mapsDrop = {}, f, i, e, mb = 0, nmaps = 0;
+	for (i = 0; i < A.nodes.length; i++) {
+		e = A.nodes[i];
+		counts[e.status] = (counts[e.status] || 0) + 1;
+		if (detail) { list.push(e.reason ? { label: e.label, status: e.status, reason: e.reason } : { label: e.label, status: e.status }); }
+		if (e.status === "already_hidden") { continue; }
+		fTotal += e.size ? e.size.facets : 0;
+		if (e.status === "out_of_frame" || e.status === "covered") {
+			drop.push(e.label + (e.status === "covered" ? " (covered)" : ""));
+			fDrop += e.size ? e.size.facets : 0;
+			for (f in e.surf.maps) { if (e.surf.maps.hasOwnProperty(f)) { mapsDrop[f] = true; } }
+		} else {
+			if (e.status === "kept") { kept.push({ label: e.label, reason: e.reason }); }
+			if (e.surf) { for (f in e.surf.maps) { if (e.surf.maps.hasOwnProperty(f)) { mapsKept[f] = true; } } }
+		}
+	}
+	for (f in mapsDrop) {
+		if (!mapsDrop.hasOwnProperty(f) || mapsKept[f]) { continue; }
+		nmaps++;
+		try { mb += new DzFileInfo(f).size() / 1048576; } catch (e2) { /* size unknown */ }
+	}
+	out[hidden ? "hidden" : "would_hide"] = drop;
+	out.counts = counts;
+	out.kept = kept;
+	out.savings = {
+		facets: fDrop,
+		facets_total: fTotal,
+		percent: fTotal ? DazMcp.round(100 * fDrop / fTotal, 1) : 0,
+		texture_files: nmaps,
+		texture_mb_on_disk: DazMcp.round(mb, 1)
+	};
+	out.warnings = A.warnings;
+	if (detail) { out.nodes = list; }
+	return out;
+}
+
+function findById(id) {
+	var all = Scene.getNodeList(), i;
+	for (i = 0; i < all.length; i++) { if (DazMcp.idOf(all[i]) === String(id)) { return all[i]; } }
+	return null;
+}
+
+function dazmcpTool(args) {
+	var action = args.action || "check";
+	var started = new Date().getTime();
+	var A, out, hidden, i, e, n, changed, missing, ids;
+	if (action === "set") {
+		ids = args.ids || [];
+		changed = [];
+		missing = [];
+		for (i = 0; i < ids.length; i++) {
+			n = findById(ids[i].id);
+			if (!n && ids[i].label) { n = DazMcp.findNode(ids[i].label); }
+			if (!n) { missing.push(ids[i].label || ids[i].id); continue; }
+			if (renderVisible(n) !== !!args.visible) {
+				setRenderVisible(n, !!args.visible);
+				changed.push(String(n.getLabel()));
+			}
+		}
+		return { visible_in_render: !!args.visible, changed: changed, missing: missing };
+	}
+	if (action !== "check" && action !== "hide") { throw DazMcp.fail("bad_args", "Unknown action " + action + "."); }
+	A = analyze(args);
+	hidden = [];
+	if (action === "hide") {
+		for (i = 0; i < A.nodes.length; i++) {
+			e = A.nodes[i];
+			if (e.status !== "out_of_frame" && e.status !== "covered") { continue; }
+			setRenderVisible(e.node, false);
+			hidden.push({ id: e.id, label: e.label });
+		}
+	}
+	out = report(A, action === "hide", args.detail === true);
+	if (action === "hide") { out.hidden_ids = hidden; }
+	out.seconds = DazMcp.round((new Date().getTime() - started) / 1000, 1);
+	return out;
+}

@@ -75,6 +75,7 @@ frames only). It uses ffmpeg from PATH or the one Daz Studio ships.
 - **Flat light:** move the key light to the side and above (45 degrees), lower
   the dome, add a rim light behind.
 - **Subject cut off:** reframe with a bigger `margin` or another `yaw`/`pitch`.
-- **Render takes too long:** smaller size, lower `max_time`, fewer lights, hide
-  what the camera does not see (`node_set(visible=false)`).
+- **Render takes too long or runs out of memory:** smaller size, lower
+  `max_time`, fewer lights, and leave out what the camera does not see:
+  `render(..., cull=true)` (see `render-culling`).
 - **The render failed:** check the folder exists and that Daz shows no dialog.

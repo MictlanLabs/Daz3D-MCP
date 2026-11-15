@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from asset_fixture import box_vertices, write_cape_fbx, write_fbx, write_obj
+from asset_fixture import box_vertices, write_blender_room_fbx, write_cape_fbx, write_fbx, write_obj
 from daz3d_mcp import meshes
 
 
@@ -63,3 +63,42 @@ def test_other_formats_are_refused(tmp_path):
     glb.write_bytes(b"glTF")
     with pytest.raises(meshes.MeshError, match="Convert"):
         meshes.inspect_mesh(glb)
+
+
+def test_blender_fbx_size_includes_object_transforms(tmp_path):
+    info = meshes.inspect_mesh(write_blender_room_fbx(tmp_path / "Bedroom.fbx"))
+    # The vertices alone look like a 4 m room in meters ...
+    assert info["bbox_raw"]["size"] == [4.2, 3.6, 2.62]
+    assert info["units_in_file"]["name"] == "cm"
+    # ... but Daz applies the object's scale and -90 X turn: 114 m wide, Y up.
+    box = info["bbox_cm"]
+    assert box["size"] == pytest.approx([11429.71, 4753.31, 11429.71], abs=0.1)
+    assert box["min"][1] == pytest.approx(-1814.24, abs=0.01) and box["max"][1] == pytest.approx(2939.07, abs=0.01)
+    assert info["suggested_scale"] == 0.1
+    assert any("10x too big" in w and "scale=0.1" in w for w in info["warnings"])
+    assert any("non-uniform object scale" in w for w in info["warnings"])
+    assert info["extra_nodes"] == ["Camera", "Light"]
+    assert info["transparent_surfaces"] == ["Windows"]
+    assert info["objects"][0] == {"name": "Room", "kind": "Mesh", "scale": [2721.36, 3174.92, 1814.24],
+                                  "rotation": [-90.0, 0.0, 0.0]}
+
+
+def test_plain_fbx_has_no_size_advice(tmp_path):
+    info = meshes.inspect_mesh(write_cape_fbx(tmp_path))
+    assert info["bbox_cm"]["size"] == [64, 97, 16]
+    assert "suggested_scale" not in info and info["transparent_surfaces"] == [] and "extra_nodes" not in info
+
+
+def test_size_advice():
+    assert meshes.size_advice([11468, 6553, 8330])[0] == 0.1
+    assert meshes.size_advice([540, 370, 630]) == (None, None)
+    assert meshes.size_advice([0.42, 0.3, 0.2])[0] == 10
+    assert meshes.size_advice([900000, 1, 1])[0] == 0.001
+    assert meshes.size_advice([0, 0, 0]) == (None, None)
+
+
+def test_obj_transparent_surfaces_from_mtl(tmp_path):
+    obj = write_obj(tmp_path / "Window.obj", [-50, 0, -2], [50, 120, 2], materials=("Frame", "Glass"))
+    mtl = obj.with_suffix(".mtl")
+    mtl.write_text(mtl.read_text().replace("newmtl Glass\n", "newmtl Glass\nd 0.2\n"))
+    assert meshes.inspect_mesh(obj)["transparent_surfaces"] == ["Glass"]

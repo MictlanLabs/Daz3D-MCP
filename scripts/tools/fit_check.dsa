@@ -6,16 +6,34 @@
 // args:
 //   figure     (string, required) label
 //   against    ([string]) labels of props or figures; default: every visible
-//              prop whose bounding box touches the figure's
+//              prop whose bounding box touches the figure's, except what
+//              belongs to the figure (toon outline shells, props parented to
+//              it or to what it wears)
 //   max_depth  (number, default 15) deepest overlap that counts, cm
 //   worn       (bool, default false) also test clothing and hair
 //   floor_y    (number) also report how far each foot is above this height
+
+// True when the node hangs under the figure, or under something fitted to it
+// (a toon outline or other geometry shell, a prop in its hand, an outline of
+// its shirt): part of the figure, not furniture.
+function ownedBy(node, fig) {
+	var n = node.getNodeParent();
+	var guard = 0, t;
+	while (n && guard < 500) {
+		if (DazMcp.same(n, fig)) { return true; }
+		t = DazMcp.nodeType(n);
+		if (t === "fitted_figure" && DazMcp.same(DazMcp.ownerFigure(n), fig)) { return true; }
+		n = n.getNodeParent();
+		guard++;
+	}
+	return false;
+}
 
 function dazmcpTool(args) {
 	var fig = DazMcp.requireFigure(args.figure);
 	if (DazMcp.nodeType(fig) === "fitted_figure") { fig = fig.getFollowTarget(); }
 	var against = [];
-	var i, all, box, b, t, low;
+	var i, all, box, b, t, low, skipped = [];
 	if (args.against && args.against.length) {
 		for (i = 0; i < args.against.length; i++) { against.push(DazMcp.requireNode(args.against[i], "against")); }
 	} else {
@@ -24,6 +42,7 @@ function dazmcpTool(args) {
 		for (i = 0; i < all.length; i++) {
 			t = DazMcp.nodeType(all[i]);
 			if (t !== "prop" || !all[i].isVisible()) { continue; }
+			if (DazMcp.inherits(all[i], "DzGeometryShellNode") || ownedBy(all[i], fig)) { skipped.push(all[i].getLabel()); continue; }
 			try { b = all[i].getWSBoundingBox(); } catch (e) { b = null; }
 			if (!b || !b.isValid()) { continue; }
 			if (b.max.x < box.min[0] || b.min.x > box.max[0] || b.max.y < box.min[1] || b.min.y > box.max[1] ||
@@ -33,6 +52,7 @@ function dazmcpTool(args) {
 	}
 	var report = DazMcp.fitCheck(fig, against, { max_depth: args.max_depth, worn: args.worn === true });
 	if (!against.length) { report.hints = ["No prop touches the figure's bounding box. Name the props in `against`."]; }
+	if (skipped.length) { report.skipped_own = skipped.slice(0, 20); }
 	if (args.floor_y !== undefined && args.floor_y !== null) {
 		low = DazMcp.lowestPoints(fig, { left_foot: true, right_foot: true });
 		report.feet = {};

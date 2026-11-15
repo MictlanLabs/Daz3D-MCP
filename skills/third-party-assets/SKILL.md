@@ -57,16 +57,43 @@ content_load(path=items[0].path, target="Ana")
 ## Importing an OBJ or FBX
 
 ```text
-mesh_inspect(path)        -> size in file units, suggested_units, surfaces, textures, rigged
+mesh_inspect(path)        -> size, suggested_units, surfaces, textures, rigged
 import_mesh(path, label="Tavern Table", drop_to_floor=true, position=[120, 0, 0])
 viewport_capture()
 ```
 
 - Daz works in centimeters. OBJ files have no units: `units="auto"` guesses
   from the size (a 1.8-unit-tall person is in meters). FBX stores its units
-  and the importer converts them. If `import_mesh` warns that the size is
-  wrong, or the model is clearly too big or small in the capture, import again
-  with `units=` (`m`, `cm`, `mm`, `in`, `ft`) or `height=` in cm.
+  and the importer converts them: **leave `units` on auto for FBX**.
+- For FBX, read the size from `bbox_cm` (what Daz will make of it), not from
+  `bbox_raw`. Blender keeps the object's unapplied scale and rotation, and
+  its meters-to-cm factor, on the object instead of the vertices, so the raw
+  vertices of a room can look like "4 m in meters" while Daz makes it 114 m.
+- If `mesh_inspect` or `import_mesh` gives `suggested_scale` (the size is not
+  believable for a room, prop or person), import with `scale=` that value.
+  Check the result against something of known size: a bed top is about 50 cm,
+  a door about 200 cm, a ceiling 240-370 cm. Use `height=` in cm for an exact
+  size.
+- `import_mesh` leaves out the camera, light and empty nodes a Blender export
+  brings along (`keep_empties=true` keeps them), and turns surfaces the file
+  marks see-through (`transparent_surfaces`, e.g. windows) into clear Iray
+  glass (`glass=false` to skip).
+
+### A room or set from Blender
+
+```text
+mesh_inspect(path)                     -> bbox_cm, suggested_scale, extra_nodes, transparent_surfaces
+import_mesh(path, label="Bedroom", scale=<suggested_scale if any>, drop_to_floor=true, room=true)
+prop_surfaces(node="Bedroom")          -> floor at 0, bed / sofa / chair tops for furniture-poses
+```
+
+- `room=true` stands the floor (the largest level surface) on Y = 0. Without
+  it `drop_to_floor` uses the lowest point, which in a set is often ground or
+  scenery under the floor.
+- For fit_check in a room, name the room in `against` when the figure is near
+  other props; the figure's own toon outlines and held props are left out.
+- Tell the user that applying all transforms in Blender (Object > Apply > All
+  Transforms) before exporting gives a cleaner node.
 - Model downloads from Blender or 3ds Max may be Z-up: if an OBJ imports lying
   down, delete it and import with `up_axis="Z"`.
 - `drop_to_floor=true` for props and furniture. **Never** for clothing modeled

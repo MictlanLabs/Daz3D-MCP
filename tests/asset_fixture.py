@@ -78,6 +78,66 @@ def write_fbx(path: Path, vertices: list[float], unit_cm: float = 1.0, materials
     return path
 
 
+def _p(name: str, kind: str, *values) -> tuple:
+    return ("P", [name, kind, "", "A", *[float(v) for v in values]], [])
+
+
+def write_blender_room_fbx(path: Path) -> Path:
+    """A room as Blender exports it: Z-up vertices in meters, the object's unapplied rotation (-90 on X)
+    and non-uniform scale (x100 for meters to cm) kept on the Model, the file in cm, the scene's camera
+    and light along, and a see-through Windows material. Daz makes it about 114 m wide."""
+    header = b"Kaydara FBX Binary  \x00\x1a\x00" + struct.pack("<I", 7400)
+    verts = box_vertices([-2.1, -1.8, -1.0], [2.1, 1.8, 1.62])
+    objects = [
+        ("Geometry", [1, "Cube\x00\x01Geometry", "Mesh"], [("Vertices", [("d", verts, True)], [])]),
+        ("Model", [2, "Room\x00\x01Model", "Mesh"], [("Properties70", [], [
+            _p("Lcl Rotation", "Lcl Rotation", -90, 0, 0),
+            _p("Lcl Scaling", "Lcl Scaling", 2721.36, 3174.92, 1814.24)])]),
+        ("Model", [3, "Camera\x00\x01Model", "Camera"], [("Properties70", [], [
+            _p("Lcl Translation", "Lcl Translation", 735.9, 495.8, 692.6),
+            _p("Lcl Scaling", "Lcl Scaling", 100, 100, 100)])]),
+        ("Model", [4, "Light\x00\x01Model", "Light"], [("Properties70", [], [
+            _p("Lcl Scaling", "Lcl Scaling", 100, 100, 100)])]),
+        ("Material", [10, "Walls\x00\x01Material", ""], [("Properties70", [], [
+            _p("DiffuseColor", "Color", 0.8, 0.8, 0.8)])]),
+        ("Material", [11, "Windows\x00\x01Material", ""], [("Properties70", [], [
+            _p("TransparencyFactor", "Number", 0.917), _p("Opacity", "Number", 0.083)])]),
+    ]
+    top = [
+        ("FBXHeaderExtension", [], [("FBXVersion", [7400], [])]),
+        ("GlobalSettings", [], [("Properties70", [], [
+            ("P", ["UpAxis", "int", "Integer", "", 1], []),
+            ("P", ["UnitScaleFactor", "double", "Number", "", 1.0], []),
+        ])]),
+        ("Objects", [], objects),
+        ("Connections", [], [("C", ["OO", 2, 0], []), ("C", ["OO", 3, 0], []), ("C", ["OO", 4, 0], []),
+                             ("C", ["OO", 1, 2], []), ("C", ["OO", 10, 2], []), ("C", ["OO", 11, 2], [])]),
+    ]
+    out = header
+    for n in top:
+        out += _node(*n, offset=len(out))
+    out += b"\0" * 13 + b"\xfa\xbc\xab\x09\xd0\xc8\xd4\x66\xb1\x76\xfb\x83\x1c\xf7\x26\x7e" + b"\0" * 4
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(out)
+    return path
+
+
+def write_uber_preset(library: Path) -> Path:
+    """Daz Studio's '!Iray Uber Base' shader preset, as the fake applies it to selected surfaces."""
+    f = library / "Shader Presets/Iray/DAZ Uber/!Iray Uber Base.duf"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    props = {"Base Color": {"type": "color", "value": [1, 1, 1], "mappable": True, "map": None},
+             "Glossy Roughness": {"type": "float", "value": 0.5, "min": 0, "max": 1},
+             "Refraction Weight": {"type": "float", "value": 0, "min": 0, "max": 1},
+             "Refraction Index": {"type": "float", "value": 1.5, "min": 0, "max": 10},
+             "Thin Walled": {"type": "bool", "value": False},
+             "Cutout Opacity": {"type": "float", "value": 1, "min": 0, "max": 1}}
+    f.write_text(json.dumps({"file_version": "0.6.0.0", "asset_info": {"type": "preset_material"},
+                             "dazmcp_fake": {"shader": {"name": "Iray Uber", "cls": "DzUberIrayMaterial",
+                                                        "props": props}}}))
+    return f
+
+
 def box_vertices(mn, mx) -> list[float]:
     out: list[float] = []
     for x in (mn[0], mx[0]):

@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from daz3d_mcp.client import DazClient
 from daz3d_mcp.content import KINDS, ContentIndex, thumbnail_of
-from daz3d_mcp import video
+from daz3d_mcp import cull_tools, video
 from daz3d_mcp.paths import config_dir
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
@@ -92,9 +92,11 @@ def _clean(**kwargs) -> dict:
     return {k: v for k, v in kwargs.items() if v is not None}
 
 
-def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient]) -> Callable[[], None]:
+def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient],
+             culler: cull_tools.Culler | None = None) -> Callable[[], None]:
     """Adds the tools; returns a function that forgets the cached libraries and index."""
     state: dict[str, Any] = {"libraries": None, "index": None}
+    culls = culler or cull_tools.Culler(call)
 
     def forget() -> None:
         state["libraries"] = None
@@ -568,6 +570,9 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient]) -> C
         preview_size: Annotated[int, Field(ge=64, le=4096)] = 1024,
         frame: Annotated[int | None, Field(ge=0, description="Timeline frame to render; default the "
                                                              "current one.")] = None,
+        cull: Annotated[bool, Field(description="Leave out what this camera cannot see (render_cull) for "
+                                                "this render only; everything is put back after.")] = False,
+        cull_keep: Annotated[list[str] | None, Field(description="With cull: labels never to leave out.")] = None,
     ) -> list:
         """Renders the scene with the current renderer (Iray), waits until it is done and returns the
         image. Set max_time or max_samples so a test render does not run for long."""
@@ -585,11 +590,17 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient]) -> C
         captures = config_dir() / "captures"
         captures.mkdir(parents=True, exist_ok=True)
         preview = captures / f"render-preview-{int(time.time() * 1000)}.png"
-        result = await call("render", _clean(out_path=out.as_posix(), preview_path=preview.as_posix(),
-                                             preview_size=preview_size, camera=camera, width=width, height=height,
-                                             max_samples=max_samples, max_time=max_time, quality=quality,
-                                             frame=frame, overwrite=overwrite or None),
-                            timeout=settings.render_timeout)
+        if cull and (width or height):  # the framing the cull tests depends on the aspect ratio
+            await call("render_settings", _clean(width=width, height=height))
+        frames = [frame] if frame is not None else None
+        async with culls.during(cull, cull_tools.cull_args(camera, frames, cull_keep)) as culled:
+            result = await call("render", _clean(out_path=out.as_posix(), preview_path=preview.as_posix(),
+                                                 preview_size=preview_size, camera=camera, width=width,
+                                                 height=height, max_samples=max_samples, max_time=max_time,
+                                                 quality=quality, frame=frame, overwrite=overwrite or None),
+                                timeout=settings.render_timeout)
+        if culled:
+            result["cull"] = cull_tools.summary(culled)
         content: list = []
         shown = Path(result["preview"]) if result.get("preview") else Path(result["path"])
         if shown.is_file() and shown.stat().st_size <= PREVIEW_MAX_BYTES:
@@ -626,6 +637,10 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient]) -> C
                                                   "ones (to continue a stopped render).")] = True,
         previews: Annotated[int, Field(ge=0, le=6, description="Frames to return as images.")] = 3,
         preview_size: Annotated[int, Field(ge=64, le=2048)] = 512,
+        cull: Annotated[bool, Field(description="Leave out what the camera sees at none of the frames "
+                                                "(render_cull, tested on up to 12 of them); put back after.")
+                        ] = False,
+        cull_keep: Annotated[list[str] | None, Field(description="With cull: labels never to leave out.")] = None,
     ) -> list:
         """Renders the whole animation (or a frame range) with Iray, one image per frame, and joins
         them into an MP4 or GIF. Waits until it is done. It takes about frames x max_time: render a
@@ -666,25 +681,27 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient]) -> C
         started = time.time()
         seconds: list[float] = []
         cam_used = camera
-        for i, f in enumerate(todo):
-            args = _clean(out_path=files[f].as_posix(), camera=camera, frame=f)
-            if f in preview_frames:
-                pv = captures / f"anim-preview-{int(time.time() * 1000)}-{f}.png"
-                args.update(preview_path=pv.as_posix(), preview_size=preview_size)
-            try:
-                res = await call("render", args, timeout=settings.render_timeout)
-            except ToolError as exc:
-                done = len(frames) - len(todo) + i
-                raise ToolError(f"Frame {f} failed: {exc} {done} of {len(frames)} frames are in {folder}; "
-                                "call render_animation again with this out_dir to continue.") from exc
-            seconds.append(float(res.get("seconds") or 0))
-            cam_used = res.get("camera") or cam_used
-            if res.get("preview"):
-                preview_files[f] = Path(res["preview"])
-            try:
-                await ctx.report_progress(i + 1, len(todo), f"frame {f} ({i + 1}/{len(todo)})")
-            except Exception:  # progress is optional; not every client asks for it
-                pass
+        cull_frames = cull_tools.sample_frames(frames[0], frames[-1], cull_tools.MAX_SAMPLED_FRAMES)             if len(frames) > 1 else frames
+        async with culls.during(cull and bool(todo), cull_tools.cull_args(camera, cull_frames, cull_keep)) as culled:
+            for i, f in enumerate(todo):
+                args = _clean(out_path=files[f].as_posix(), camera=camera, frame=f)
+                if f in preview_frames:
+                    pv = captures / f"anim-preview-{int(time.time() * 1000)}-{f}.png"
+                    args.update(preview_path=pv.as_posix(), preview_size=preview_size)
+                try:
+                    res = await call("render", args, timeout=settings.render_timeout)
+                except ToolError as exc:
+                    done = len(frames) - len(todo) + i
+                    raise ToolError(f"Frame {f} failed: {exc} {done} of {len(frames)} frames are in {folder}; "
+                                    "call render_animation again with this out_dir to continue.") from exc
+                seconds.append(float(res.get("seconds") or 0))
+                cam_used = res.get("camera") or cam_used
+                if res.get("preview"):
+                    preview_files[f] = Path(res["preview"])
+                try:
+                    await ctx.report_progress(i + 1, len(todo), f"frame {f} ({i + 1}/{len(todo)})")
+                except Exception:  # progress is optional; not every client asks for it
+                    pass
 
         result: dict[str, Any] = {
             "folder": folder.as_posix(),
@@ -701,6 +718,8 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient]) -> C
             "settings": used,
             "video": None,
         }
+        if culled:
+            result["cull"] = cull_tools.summary(culled)
         if video_format != "none":
             vfps = fps or tl_fps / step
             ffmpeg = video.find_ffmpeg(settings.extra.get("ffmpeg"))
@@ -750,6 +769,9 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient]) -> C
                                                             "so the state carries over.")] = None,
         previews: Annotated[int, Field(ge=0, le=12, description="Images to return.")] = 6,
         preview_size: Annotated[int, Field(ge=64, le=2048)] = 384,
+        cull: Annotated[bool, Field(description="For each beat, leave out what its camera cannot see "
+                                                "(render_cull); put back after each image.")] = False,
+        cull_keep: Annotated[list[str] | None, Field(description="With cull: labels never to leave out.")] = None,
     ) -> list:
         """Renders a dialogue scene as a series of shots for a visual novel: for each beat it sets the
         faces and gazes, frames the camera (camera_shot) and renders, into NN_<name> images plus a
@@ -831,10 +853,15 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient]) -> C
                     pv = captures / f"shot-preview-{int(time.time() * 1000)}-{n}.png"
                     args.update(preview_path=pv.as_posix(), preview_size=preview_size)
                 try:
-                    res = await call("render", args, timeout=settings.render_timeout)
+                    async with culls.during(cull, cull_tools.cull_args(camera, None, cull_keep)) as culled:
+                        res = await call("render", args, timeout=settings.render_timeout)
                 except ToolError as exc:
                     raise ToolError(f"Beat {n} ({b.name}) failed: {exc} {rendered} new images are in "
                                     f"{folder}; call render_shots again with this out_dir to continue.") from exc
+                if culled:
+                    entry["cull"] = {"hidden": len(culled.get("hidden", [])),
+                                     "facets_saved_percent": (culled.get("savings") or {}).get("percent")}
+                    warnings.extend(f"beat {n}: {w}" for w in culled.get("warnings", []) if w not in warnings)
                 rendered += 1
                 if res.get("preview"):
                     shown[i] = Path(res["preview"])

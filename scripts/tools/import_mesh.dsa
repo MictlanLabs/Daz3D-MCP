@@ -12,8 +12,15 @@
 //   label         (string) label for the imported node
 //   position      [x, y, z] cm
 //   drop_to_floor (bool) put its lowest point at Y = 0
+//   room          (bool) with drop_to_floor: put its floor (largest level
+//                 surface) at Y = 0 instead
 //   take          (string) FBX: animation take to read
 //   options       {key: value} extra importer settings (DzFileIOSettings)
+//   drop_empties  (bool) remove what came in with no mesh and nothing under it
+//                 (the camera, light and empties a Blender scene exports)
+//   glass         ([string]) surfaces to make clear Iray glass (see-through
+//                 in the file); the PBR shader the FBX importer uses has no
+//                 transparency, so they are switched to Iray Uber first
 
 var IMPORTERS = { obj: "DzObjImporter", fbx: "DzFbxImporter" };
 
@@ -31,6 +38,79 @@ function findImporter(format, path) {
 	try { imp = mgr.findImporterByClassName(IMPORTERS[format]); } catch (e) { imp = null; }
 	if (!imp) { try { imp = mgr.findImporter(path); } catch (e2) { imp = null; } }
 	return imp;
+}
+
+var UBER_PRESET = "Shader Presets/Iray/DAZ Uber/!Iray Uber Base.duf";
+var GLASS = { "Refraction Weight": 1, "Refraction Index": 1, "Thin Walled": true, "Glossy Roughness": 0.02,
+	"Cutout Opacity": 1 };
+
+function uberPreset() {
+	var dirs = DazMcp.contentDirs();
+	var i, f;
+	for (i = 0; i < dirs.length; i++) {
+		f = dirs[i].path + "/" + UBER_PRESET;
+		if (DazMcp.fileExists(f)) { return f; }
+	}
+	return null;
+}
+
+// The meshes of an import: the roots and every prop under them.
+function meshNodes(roots) {
+	var out = [];
+	var i;
+	for (i = 0; i < roots.length; i++) { out = out.concat(DazMcp.propMeshNodes(roots[i])); }
+	return out;
+}
+
+// Switches one surface to Iray Uber (when it is not) and makes it clear glass.
+function makeGlass(node, index, preset) {
+	var shape = node.getObject().getCurrentShape();
+	var m = shape.getMaterial(index);
+	var i;
+	if (!DazMcp.findProp(m, "Refraction Weight")) {
+		if (!preset) { return "Daz Studio's '!Iray Uber Base' shader preset is not installed"; }
+		DazMcp.selectOnly(node);
+		for (i = 0; i < shape.getNumMaterials(); i++) { shape.getMaterial(i).select(i === index); }
+		App.getContentMgr().openFile(preset, true);
+		m = shape.getMaterial(index);
+		if (!DazMcp.findProp(m, "Refraction Weight")) { return "the Iray Uber shader could not be applied"; }
+	}
+	DazMcp.setProps(m, GLASS);
+	return null;
+}
+
+function applyGlass(nodes, names, warnings) {
+	var want = {}, done = [], preset = null, looked = false;
+	var i, j, shape, m, err;
+	for (i = 0; i < names.length; i++) { want[DazMcp.lower(names[i])] = true; }
+	for (i = 0; i < nodes.length; i++) {
+		try { shape = nodes[i].getObject().getCurrentShape(); } catch (e) { shape = null; }
+		if (!shape) { continue; }
+		for (j = 0; j < shape.getNumMaterials(); j++) {
+			m = shape.getMaterial(j);
+			if (!want[DazMcp.lower(m.getName())] && !want[DazMcp.lower(m.getLabel())]) { continue; }
+			if (!looked && !DazMcp.findProp(m, "Refraction Weight")) { preset = uberPreset(); looked = true; }
+			err = makeGlass(nodes[i], j, preset);
+			if (err) { warnings.push("Surface " + m.getLabel() + " stays opaque: " + err + "."); }
+			else { done.push(shape.getMaterial(j).getLabel()); }
+		}
+	}
+	if (preset) {
+		// leave no surface selected, as after a plain import
+		for (i = 0; i < nodes.length; i++) {
+			try { shape = nodes[i].getObject().getCurrentShape(); } catch (e2) { continue; }
+			for (j = 0; j < shape.getNumMaterials(); j++) { shape.getMaterial(j).select(false); }
+		}
+	}
+	return done;
+}
+
+// A power of ten that brings a size back to a room, prop or person (1 cm to 50 m).
+function sizeFix(longest) {
+	var s = 1;
+	while (longest * s > 5000) { s /= 10; }
+	while (longest * s < 1) { s *= 10; }
+	return s;
 }
 
 function dazmcpTool(args) {
@@ -89,6 +169,21 @@ function dazmcpTool(args) {
 	if (!added.length) {
 		throw DazMcp.fail("import_failed", "The importer finished but nothing was added to the scene.", { path: path });
 	}
+	// Blender exports its scene camera and light as nodes with nothing in them.
+	var dropped = [];
+	if (args.drop_empties === true) {
+		var kept = [];
+		for (i = 0; i < added.length; i++) {
+			if (DazMcp.nodeType(added[i]) === "node" && DazMcp.className(added[i]) === "DzNode" &&
+				!added[i].getNodeChildren(false).length && added.length - dropped.length > 1) {
+				dropped.push(added[i].getLabel());
+				Scene.removeNode(added[i]);
+			} else {
+				kept.push(added[i]);
+			}
+		}
+		added = kept;
+	}
 	// The top nodes of what was imported (an FBX can bring a hierarchy).
 	var ids = {};
 	for (i = 0; i < added.length; i++) { ids[DazMcp.idOf(added[i])] = true; }
@@ -101,6 +196,7 @@ function dazmcpTool(args) {
 	if (args.label && roots.length === 1) { root.setLabel(args.label); }
 
 	warnings = [];
+	var glass = args.glass && args.glass.length ? applyGlass(meshNodes(roots), args.glass, warnings) : [];
 	if (args.post_scale && args.post_scale !== 1) {
 		for (i = 0; i < roots.length; i++) {
 			s = roots[i].getScaleControl();
@@ -124,27 +220,46 @@ function dazmcpTool(args) {
 	if (pos) {
 		for (i = 0; i < roots.length; i++) { DazMcp.setTransform(roots[i], pos, null, null); }
 	}
+	var floorInfo = null;
 	if (args.drop_to_floor === true) {
 		box = DazMcp.bboxOf(roots);
-		if (box) {
+		var lift = box ? -box.min[1] : 0;
+		if (args.room === true) {
+			// A room's lowest point is often the ground or scenery outside it:
+			// stand its floor, the largest level surface, on Y = 0 instead.
+			var best = null, found, k;
 			for (i = 0; i < roots.length; i++) {
-				p = roots[i].getYPosControl();
-				p.setValue(p.getValue() - box.min[1]);
+				found = DazMcp.supportSurfaces(roots[i], { min_area: 10000 }).surfaces;
+				for (k = 0; k < found.length; k++) { if (!best || found[k].area > best.area) { best = found[k]; } }
 			}
+			if (best) {
+				lift = -best.y;
+				floorInfo = { was_at_y: DazMcp.round(best.y, 1), size_cm: [DazMcp.round(best.size[0], 1), DazMcp.round(best.size[1], 1)],
+					below_floor_cm: box ? DazMcp.round(best.y - box.min[1], 1) : 0 };
+			} else {
+				warnings.push("No level surface of 1 m2 or more was found for a floor; its lowest point is at Y = 0.");
+			}
+		}
+		for (i = 0; i < roots.length; i++) {
+			p = roots[i].getYPosControl();
+			p.setValue(p.getValue() + lift);
 		}
 	}
 
 	box = DazMcp.bboxOf(roots);
 	var info = DazMcp.boxInfo(box);
+	var fix = 1;
 	if (info) {
 		h = info.size[1];
 		var longest = Math.max(info.size[0], info.size[1], info.size[2]);
-		if (longest < 2) {
-			warnings.push("It is only " + DazMcp.round(longest, 3) + " cm across: the units are probably wrong " +
-				"(try units='m' or height=...).");
-		} else if (longest > 10000) {
-			warnings.push("It is " + DazMcp.round(longest / 100, 1) + " m across: the units are probably wrong " +
-				"(try units='mm' or 'cm', or height=...).");
+		fix = longest > 0 ? sizeFix(longest) : 1;
+		if (fix < 1) {
+			warnings.push("It is " + DazMcp.round(longest / 100, 1) + " m across, too big for a room, prop or person: " +
+				"the model is probably " + DazMcp.round(1 / fix, 0) + "x too big (an unapplied object scale or a wrong " +
+				"unit). Import it again with scale=" + fix + ", or use height=...");
+		} else if (fix > 1) {
+			warnings.push("It is only " + DazMcp.round(longest, 3) + " cm across: the model is probably " + fix +
+				"x too small (wrong units). Import it again with scale=" + fix + ", or use height=...");
 		}
 	}
 
@@ -164,6 +279,10 @@ function dazmcpTool(args) {
 		scale: DazMcp.round(root.getScaleControl().getValue(), 4),
 		warnings: warnings
 	};
+	if (fix !== 1 && info) { out.suggested_scale = fix; }
+	if (dropped.length) { out.removed_empty_nodes = dropped; }
+	if (floorInfo) { out.floor = floorInfo; }
+	if (glass.length) { out.glass_surfaces = glass; }
 	if (out.type === "figure") {
 		out.bones = DazMcp.bones(root).length;
 		out.note = "It came with its own skeleton. It is not a Genesis rig: use wearable_from_mesh to make it " +

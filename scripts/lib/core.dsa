@@ -262,9 +262,15 @@ DazMcp.wearableKind = function (node) {
 	return "clothing";
 };
 
+// The figure's own bones. Clothing, hair and other figures fitted to it are
+// its children in the node tree, with bones of their own: those are left out.
 DazMcp.bones = function (figure) {
 	var out = [];
-	var i, n, kids;
+	var i, n, kids, sk, list;
+	try {
+		list = figure.getAllBones();
+		if (list) { return list.slice ? list.slice(0) : list; }
+	} catch (e0) { /* older API */ }
 	try {
 		n = figure.getNumBones();
 		for (i = 0; i < n; i++) { if (figure.getBone(i)) { out.push(figure.getBone(i)); } }
@@ -272,7 +278,10 @@ DazMcp.bones = function (figure) {
 	} catch (e) { /* fall back to the node tree */ }
 	kids = figure.getNodeChildren(true);
 	for (i = 0; i < kids.length; i++) {
-		if (DazMcp.nodeType(kids[i]) === "bone") { out.push(kids[i]); }
+		if (DazMcp.nodeType(kids[i]) !== "bone") { continue; }
+		try { sk = kids[i].getSkeleton(); } catch (e2) { sk = null; }
+		if (sk && !DazMcp.same(sk, figure)) { continue; }
+		out.push(kids[i]);
 	}
 	return out;
 };
@@ -1448,6 +1457,21 @@ DazMcp.nodeDir = function (node, v) {
 	return [v[0] * Math.cos(yaw) + v[2] * Math.sin(yaw), v[1], -v[0] * Math.sin(yaw) + v[2] * Math.cos(yaw)];
 };
 
+// Two level directions square to a node's own axes, for its length and width.
+// Its local X and Z, unless the node is turned on its side (a Blender model
+// imported with -90 on X has its local Z pointing up): then the two local
+// axes that lie flattest.
+DazMcp.groundFrame = function (node) {
+	var dirs = [DazMcp.nodeDir(node, [1, 0, 0]), DazMcp.nodeDir(node, [0, 1, 0]), DazMcp.nodeDir(node, [0, 0, 1])];
+	var up = 1, i, x, len;
+	for (i = 0; i < 3; i++) { if (Math.abs(dirs[i][1]) > Math.abs(dirs[up][1])) { up = i; } }
+	x = dirs[up === 0 ? 2 : 0];
+	len = Math.sqrt(x[0] * x[0] + x[2] * x[2]);
+	if (len < 1e-6) { return { x: [1, 0, 0], z: [0, 0, 1] }; }
+	x = [x[0] / len, 0, x[2] / len];
+	return { x: x, z: [-x[2], 0, x[0]] };
+};
+
 // Flat surfaces to sit, lie or stand on: upward-facing triangles at one
 // height, split into pieces that touch in X/Z.
 //   opts.min_area (cm2, default 150), opts.max_tilt (degrees, default 20)
@@ -1475,8 +1499,8 @@ DazMcp.supportSurfaces = function (node, opts) {
 	}
 	if (cur) { clusters.push(cur); }
 
-	var ax = DazMcp.nodeDir(node, [1, 0, 0]);
-	var az = DazMcp.nodeDir(node, [0, 0, 1]);
+	var frame = DazMcp.groundFrame(node);
+	var ax = frame.x, az = frame.z;
 	var surfaces = [];
 	var c, j, pieces;
 	for (c = 0; c < clusters.length; c++) {

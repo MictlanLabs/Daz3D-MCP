@@ -9,6 +9,7 @@ without loading anything into Daz.
 
 from __future__ import annotations
 
+import math
 import re
 import struct
 import zlib
@@ -40,7 +41,8 @@ def guess_units(height: float) -> tuple[str, str]:
 
 
 # ---------------------------------------------------------------- OBJ --
-def _mtl_textures(mtl: Path) -> tuple[list[str], list[str], list[str]]:
+def _mtl_textures(mtl: Path, opacity: dict[str, float] | None = None) -> tuple[list[str], list[str], list[str]]:
+    """Materials, textures found and missing; opacity gets each material's d (or 1 - Tr) when it has one."""
     materials, found, missing = [], [], []
     try:
         lines = mtl.read_text("utf-8", errors="replace").splitlines()
@@ -52,6 +54,12 @@ def _mtl_textures(mtl: Path) -> tuple[list[str], list[str], list[str]]:
             continue
         if parts[0] == "newmtl" and len(parts) > 1:
             materials.append(" ".join(parts[1:]))
+        elif parts[0] in ("d", "Tr") and len(parts) > 1 and materials and opacity is not None:
+            try:
+                v = float(parts[-1])
+            except ValueError:
+                continue
+            opacity[materials[-1]] = v if parts[0] == "d" else 1.0 - v
         elif parts[0].lower().startswith(("map_", "bump", "disp", "norm", "refl")) and len(parts) > 1:
             # The file name is the last token; options such as -bm 1.0 come first.
             name = parts[-1].replace("\\", "/")
@@ -100,13 +108,14 @@ def inspect_obj(path: Path) -> dict:
     if not verts:
         raise MeshError(f"{path.name} has no vertices; it is not a valid OBJ mesh.")
     materials, found, missing = [], [], []
+    opacity: dict[str, float] = {}
     missing_mtl = []
     for lib in mtllibs:
         mtl = path.parent / lib
         if not mtl.is_file():
             missing_mtl.append(lib)
             continue
-        m, f, x = _mtl_textures(mtl)
+        m, f, x = _mtl_textures(mtl, opacity)
         materials += m
         found += f
         missing += x
@@ -125,6 +134,7 @@ def inspect_obj(path: Path) -> dict:
         "animated": False,
         "textures": found,
         "missing_textures": missing,
+        "transparent_surfaces": sorted(n for n, v in opacity.items() if v < 0.95),
         "warnings": [],
     }
     if missing_mtl:
@@ -261,31 +271,187 @@ def _binary_summary(data: bytes) -> dict:
     objects = top.get("Objects")
     meshes = rigged = animated = 0
     materials: list[str] = []
+    opacity: dict[str, float] = {}
     verts: list[float] = []
     textures: list[str] = []
+    models: dict[int, dict] = {}
+    geometries: dict[int, list[float]] = {}
     for o in (objects.children if objects else []):
         kind = o.props[2] if len(o.props) > 2 else ""
         name = o.props[1].split("\x00")[0] if len(o.props) > 1 and isinstance(o.props[1], str) else ""
-        if o.name == "Model" and kind == "Mesh":
-            meshes += 1
+        oid = o.props[0] if o.props and isinstance(o.props[0], int) else None
+        if o.name == "Model":
+            if kind == "Mesh":
+                meshes += 1
+            if oid is not None:
+                models[oid] = {"name": name, "kind": kind or "Null", **_model_transform(o)}
         elif o.name == "Deformer" and kind == "Skin":
             rigged += 1
         elif o.name in ("AnimationCurve", "AnimationCurveNode"):
             animated += 1
         elif o.name == "Material":
             materials.append(name)
+            op = _material_opacity(_p70(o))
+            if op is not None:
+                opacity[name] = op
         elif o.name == "Geometry":
             v = o.find("Vertices")
             if v and v.props and v.props[0]:
                 verts += v.props[0]
+                if oid is not None:
+                    geometries[oid] = v.props[0]
         elif o.name in ("Texture", "Video"):
             for key in ("RelativeFilename", "FileName"):
                 f = o.find(key)
                 if f and f.props and isinstance(f.props[0], str) and f.props[0]:
                     textures.append(f.props[0])
                     break
+    parents: dict[int, int] = {}
+    conns = top.get("Connections")
+    for c in (conns.find_all("C") if conns else []):
+        if len(c.props) >= 3 and c.props[0] == "OO" and isinstance(c.props[1], int) and isinstance(c.props[2], int):
+            parents.setdefault(c.props[1], c.props[2])
     return {"props": props, "meshes": meshes, "rigged": bool(rigged), "animated": bool(animated),
-            "materials": materials, "verts": verts, "textures": textures}
+            "materials": materials, "verts": verts, "textures": textures, "opacity": opacity,
+            "models": models, "geometries": geometries, "parents": parents}
+
+
+# ------------------------------------------------- FBX object transforms --
+# Blender keeps an object's unapplied scale and rotation (and its meters to
+# centimeters factor) on the FBX Model, not in the vertices. Daz Studio keeps
+# them as the node's transform, so the size it shows is vertices * transform.
+def _p70(o: _FbxNode) -> dict[str, list]:
+    p70 = o.find("Properties70")
+    out: dict[str, list] = {}
+    for p in (p70.find_all("P") if p70 else []):
+        if p.props and isinstance(p.props[0], str):
+            out[p.props[0]] = p.props[4:]
+    return out
+
+
+def _vec(values: list | None, default: float) -> list[float]:
+    if not values or len(values) < 3 or not all(isinstance(v, (int, float)) for v in values[:3]):
+        return [default] * 3
+    return [float(v) for v in values[:3]]
+
+
+def _model_transform(o: _FbxNode) -> dict:
+    p = _p70(o)
+    order = p.get("RotationOrder")
+    return {"t": _vec(p.get("Lcl Translation"), 0.0), "r": _vec(p.get("Lcl Rotation"), 0.0),
+            "s": _vec(p.get("Lcl Scaling"), 1.0), "pre": _vec(p.get("PreRotation"), 0.0),
+            "order": int(order[0]) if order and isinstance(order[0], int) else 0}
+
+
+def _material_opacity(p: dict[str, list]) -> float | None:
+    """0 (clear) to 1 (solid) from an FBX material, or None when it does not say."""
+    if p.get("Opacity") and isinstance(p["Opacity"][0], (int, float)):
+        return float(p["Opacity"][0])
+    if p.get("TransparencyFactor") and isinstance(p["TransparencyFactor"][0], (int, float)):
+        return 1.0 - float(p["TransparencyFactor"][0])
+    return None
+
+
+_ORDERS = ["XYZ", "XZY", "YZX", "YXZ", "ZXY", "ZYX"]  # FBX EFbxRotationOrder
+
+
+def _rot(deg: list[float], order: int = 0) -> list[list[float]]:
+    """Rotation matrix of FBX Euler angles; the first letter of the order turns first."""
+    out = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+    for axis in _ORDERS[order if 0 <= order < 6 else 0]:
+        a = math.radians(deg["XYZ".index(axis)])
+        c, s = math.cos(a), math.sin(a)
+        if axis == "X":
+            m = [[1, 0, 0], [0, c, -s], [0, s, c]]
+        elif axis == "Y":
+            m = [[c, 0, s], [0, 1, 0], [-s, 0, c]]
+        else:
+            m = [[c, -s, 0], [s, c, 0], [0, 0, 1]]
+        out = _mm(m, out)
+    return out
+
+
+def _mm(a: list[list[float]], b: list[list[float]]) -> list[list[float]]:
+    return [[sum(a[i][k] * b[k][j] for k in range(3)) for j in range(3)] for i in range(3)]
+
+
+def _local(m: dict) -> tuple[list[list[float]], list[float]]:
+    """(3x3, translation) of one Model: T * PreRotation * Rotation * Scale."""
+    r = _mm(_rot(m["pre"]), _rot(m["r"], m["order"]))
+    s = m["s"]
+    return [[r[i][j] * s[j] for j in range(3)] for i in range(3)], list(m["t"])
+
+
+def _world(mid: int, models: dict, parents: dict) -> tuple[list[list[float]], list[float]]:
+    lin, t = _local(models[mid])
+    seen = {mid}
+    p = parents.get(mid)
+    while p in models and p not in seen:
+        seen.add(p)
+        plin, pt = _local(models[p])
+        t = [sum(plin[i][k] * t[k] for k in range(3)) + pt[i] for i in range(3)]
+        lin = _mm(plin, lin)
+        p = parents.get(p)
+    return lin, t
+
+
+def _placed_box(s: dict) -> tuple[list[float], list[float]] | None:
+    """Bounding box of every mesh with its object transforms, in file units."""
+    models, parents = s.get("models") or {}, s.get("parents") or {}
+    mn = [float("inf")] * 3
+    mx = [float("-inf")] * 3
+    found = False
+    for gid, v in (s.get("geometries") or {}).items():
+        mid = parents.get(gid)
+        if mid not in models:
+            continue
+        lin, t = _world(mid, models, parents)
+        for i in range(3):
+            a, b, c = lin[i]
+            vals = [a * v[k] + b * v[k + 1] + c * v[k + 2] for k in range(0, len(v) - 2, 3)]
+            if vals:
+                mn[i] = min(mn[i], min(vals) + t[i])
+                mx[i] = max(mx[i], max(vals) + t[i])
+                found = True
+    return (mn, mx) if found else None
+
+
+def size_advice(size_cm: list[float]) -> tuple[float | None, str | None]:
+    """A power-of-ten scale that brings an implausible size back to a room, prop or person, and why.
+
+    Rooms, furniture, people and props are between about 1 cm and 50 m. A
+    model 10x or 100x outside that range nearly always has a stray object
+    scale or unit, not a real size.
+    """
+    longest = max(size_cm) if size_cm else 0
+    if longest <= 0:
+        return None, None
+    exp = 0
+    while longest * 10 ** exp > 5000:
+        exp -= 1
+    while longest * 10 ** exp < 1:
+        exp += 1
+    if exp == 0:
+        return None, None
+    scale = 10.0 ** exp
+    return scale, (f"It comes in {_length(longest)} across, which is not a believable size for a room, prop or "
+                   f"person. The model is most likely {_times(scale)} (an unapplied object scale or a wrong unit in "
+                   f"the program it came from). Import it with scale={scale:g} ({_length(longest * scale)} "
+                   "across), or give height= for an exact size.")
+
+
+def _length(cm: float) -> str:
+    if cm >= 100000:
+        return f"{cm / 100000:.3g} km"
+    if cm >= 100:
+        return f"{cm / 100:.3g} m"
+    if cm >= 1:
+        return f"{cm:.3g} cm"
+    return f"{cm * 10:.3g} mm"
+
+
+def _times(scale: float) -> str:
+    return f"{1 / scale:g}x too big" if scale < 1 else f"{scale:g}x too small"
 
 
 def inspect_fbx(path: Path) -> dict:
@@ -317,6 +483,48 @@ def inspect_fbx(path: Path) -> dict:
     else:
         out["vertices"] = 0
         out["bbox_raw"] = None
+    unit_cm = unit or 1.0
+    placed = _placed_box(s) if s.get("models") else None
+    if placed:
+        mn, mx = [v * unit_cm for v in placed[0]], [v * unit_cm for v in placed[1]]
+        if out["up_axis"] == "Z":  # the importer turns Z-up into Daz's Y-up
+            mn, mx = [mn[0], mn[2], -mx[1]], [mx[0], mx[2], -mn[1]]
+        out["bbox_cm"] = {"min": _r(mn), "max": _r(mx), "size": _r([mx[i] - mn[i] for i in range(3)])}
+    elif out["bbox_raw"]:
+        b = out["bbox_raw"]
+        out["bbox_cm"] = {k: _r([x * unit_cm for x in b[k]]) for k in ("min", "max", "size")}
+    else:
+        out["bbox_cm"] = None
+    objects = []
+    for m in (s.get("models") or {}).values():
+        if m["kind"] == "LimbNode":
+            continue
+        o = {"name": m["name"], "kind": m["kind"]}
+        if m["kind"] == "Mesh":
+            o["scale"] = _r(m["s"])
+            o["rotation"] = _r(m["r"])
+        objects.append(o)
+    out["objects"] = objects[:50]
+    extras = [o["name"] for o in objects if o["kind"] in ("Camera", "Light", "Null")]
+    if extras:
+        out["extra_nodes"] = extras
+        out["warnings"].append(f"It also holds {', '.join(extras)} (camera, light or empty object from the program "
+                               "it came from); import_mesh leaves them out unless keep_empties=true.")
+    clear = sorted(n for n, v in (s.get("opacity") or {}).items() if v < 0.95)
+    out["transparent_surfaces"] = clear
+    if clear:
+        out["warnings"].append(f"Surfaces {', '.join(clear)} are see-through in the file; import_mesh makes them "
+                               "Iray glass unless glass=false.")
+    odd = [o for o in objects if o.get("scale") and max(map(abs, o["scale"])) > 1.02 * min(map(abs, o["scale"]))]
+    if odd:
+        out["warnings"].append(f"{odd[0]['name']} has an unapplied non-uniform object scale {odd[0]['scale']}: Daz "
+                               "keeps it as the node's X/Y/Z scale. In Blender, Object > Apply > All Transforms "
+                               "before exporting gives a clean node.")
+    if out["bbox_cm"]:
+        scale, why = size_advice(out["bbox_cm"]["size"])
+        if scale:
+            out["suggested_scale"] = scale
+            out["warnings"].append(why)
     found, missing = [], []
     for t in sorted(set(s["textures"])):
         name = t.replace("\\", "/")

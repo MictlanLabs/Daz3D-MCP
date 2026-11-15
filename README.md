@@ -134,11 +134,12 @@ It is slower but needs nothing compiled.
 | `render_settings` | Image size and Iray limits |
 | `render` | Renders to a file and returns the image |
 | `render_shots` | Renders a conversation as a series of shots (faces, gazes and camera per line) for visual novels |
+| `render_cull` | Leaves out of the render what a camera cannot see (out of frame, behind it, clothing under clothing), keeping what still shapes the light; `cull=true` on `render`, `render_shots` and `render_animation` does it per shot |
 | `render_animation` | Renders every frame of the animation and joins them into an MP4 or GIF |
 | `run_script` | Runs DazScript for anything else (can be disabled) |
 | `daz_guide` | Returns the skills as text for agents without skills support |
 
-Skills: `daz-basics`, `scene-building`, `characters`, `faces`, `furniture-poses`, `dialogue-scenes`, `rendering`, `third-party-assets`, `animation`.
+Skills: `daz-basics`, `scene-building`, `characters`, `faces`, `furniture-poses`, `dialogue-scenes`, `rendering`, `render-culling`, `third-party-assets`, `animation`.
 
 Try it: *"Open ~/Documents/scene.duf in Daz, describe the scene and show me a capture."*
 Or: *"Build a scene with two Genesis 9 characters, dressed and posed, talking

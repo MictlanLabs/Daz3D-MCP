@@ -13,7 +13,7 @@ from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from daz3d_mcp import __version__, anim_tools, asset_tools, scene_tools
+from daz3d_mcp import __version__, anim_tools, asset_tools, cull_tools, scene_tools
 from daz3d_mcp.client import DazClient
 from daz3d_mcp.paths import config_dir
 from daz3d_mcp.skills import get_skill, list_skills
@@ -36,6 +36,9 @@ light_create and environment_set set up the shot; render makes the final image.
 Dialogue scenes (visual novels): camera_shot frames a close-up, over the shoulder
 or two shot on a face, on one side of the line between the two speakers;
 render_shots renders a whole conversation, one image per line.
+Lighter renders: render_cull leaves out of the render what a camera cannot see
+(out of the picture, behind it, under other clothing); render, render_shots and
+render_animation do it per shot with cull=true.
 Content from other stores: package_inspect and package_install put a .zip into
 a content library; import_mesh brings in loose OBJ/FBX models;
 wearable_from_mesh makes an imported garment follow a figure.
@@ -46,7 +49,7 @@ and anim_offset change speed, timing and place; anim_foot_contact and
 anim_preview check the result.
 If your client has no skills, read the guides with daz_guide first: daz-basics,
 then scene-building, characters, faces, furniture-poses, dialogue-scenes,
-rendering, third-party-assets and animation.
+rendering, render-culling, third-party-assets and animation.
 run_script runs free DazScript (ES5 JavaScript) for anything the named tools
 do not cover; prefer the named tools when they exist.
 """
@@ -78,6 +81,8 @@ def create_server(client: DazClient | None = None) -> FastMCP:
             return await anyio.to_thread.run_sync(lambda: get_client().run_tool(tool, args or {}, timeout))
         except DazError as exc:
             raise ToolError(str(exc)) from exc
+
+    culler = cull_tools.register(mcp, call)
 
     # ------------------------------------------------------------ session --
     @mcp.tool(annotations=READ_ONLY)
@@ -143,7 +148,9 @@ def create_server(client: DazClient | None = None) -> FastMCP:
         discard_changes: Annotated[bool, Field(description="Allow clearing a scene with unsaved changes.")] = False,
     ) -> dict:
         """Clears the scene. Fails on unsaved changes unless discard_changes is true; ask the user first."""
-        return await call("scene_new", {"discard_changes": discard_changes})
+        result = await call("scene_new", {"discard_changes": discard_changes})
+        culler.forget()
+        return result
 
     @mcp.tool(annotations=DESTRUCTIVE)
     async def scene_open(
@@ -152,18 +159,33 @@ def create_server(client: DazClient | None = None) -> FastMCP:
         discard_changes: Annotated[bool, Field(description="Allow replacing a scene with unsaved changes.")] = False,
     ) -> dict:
         """Opens a Daz scene (.duf), or merges it into the current one."""
-        return await call("scene_open", {"path": _daz_path(path), "merge": merge, "discard_changes": discard_changes})
+        result = await call("scene_open", {"path": _daz_path(path), "merge": merge,
+                                           "discard_changes": discard_changes})
+        if not merge:
+            culler.forget()
+        return result
 
     @mcp.tool(annotations=CHANGES_SCENE)
     async def scene_save(
         path: Annotated[str | None, Field(description="Absolute .duf path. Omit to save over the current file.")] = None,
         overwrite: Annotated[bool, Field(description="Allow replacing another existing file.")] = False,
     ) -> dict:
-        """Saves the scene as a .duf file."""
+        """Saves the scene as a .duf file. Nodes render_cull took out of the render are put back
+        for the save, so the file never keeps them switched off."""
         args: dict = {"overwrite": overwrite}
         if path:
             args["path"] = _daz_path(path)
-        return await call("scene_save", args)
+        record = culler.active()
+        if not record:
+            return await call("scene_save", args)
+        await culler.restore()
+        try:
+            result = await call("scene_save", args)
+        finally:
+            await culler.reapply(record)
+        result["render_cull"] = (f"{len(record['nodes'])} nodes hidden from the render by render_cull were "
+                                 "saved visible, and are hidden again now.")
+        return result
 
     # ---------------------------------------------------------- see it ----
     @mcp.tool(annotations=READ_ONLY, structured_output=False)
@@ -221,7 +243,7 @@ def create_server(client: DazClient | None = None) -> FastMCP:
             raise ToolError(f"No guide named {topic!r}. Call daz_guide without a topic to list them.")
         return skill.body
 
-    forget_index = scene_tools.register(mcp, call, get_client)
+    forget_index = scene_tools.register(mcp, call, get_client, culler)
     asset_tools.register(mcp, call, get_client, forget_index)
     anim_tools.register(mcp, call, get_client)
 

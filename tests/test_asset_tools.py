@@ -7,7 +7,8 @@ import json
 
 import pytest
 
-from asset_fixture import write_cape_fbx, write_fbx, box_vertices, write_obj
+from asset_fixture import (box_vertices, write_blender_room_fbx, write_cape_fbx, write_fbx, write_obj,
+                           write_uber_preset)
 from daz3d_mcp.client import DazClient
 from daz3d_mcp.settings import Settings
 from daz3d_mcp.transport import DazError
@@ -72,7 +73,40 @@ def test_import_fbx_and_bad_units_warning(client, tmp_path):
     assert res["label"] == "Hero Cape" and res["bbox"]["size"] == [64, 97, 16]
     tiny = write_fbx(tmp_path / "Ring.fbx", box_vertices([0, 0, 0], [0.01, 0.01, 0.002]))
     res = client.run_tool("import_mesh", {"path": tiny.as_posix()})
-    assert any("units are probably wrong" in w for w in res["warnings"])
+    assert any("100x too small" in w and "scale=100" in w for w in res["warnings"])
+    assert res["suggested_scale"] == 100
+
+
+def test_import_blender_room(client, bridge, tmp_path):
+    write_uber_preset(client.lib)
+    room = write_blender_room_fbx(tmp_path / "Bedroom.fbx")
+    res = client.run_tool("import_mesh", {"path": room.as_posix()})
+    # As the file says: 114 m wide, with Blender's camera and light, and a warning.
+    assert res["bbox"]["size"][0] == pytest.approx(11429.7, abs=0.1)
+    assert res["suggested_scale"] == 0.1 and any("scale=0.1" in w for w in res["warnings"])
+    assert {n["label"] for n in res["nodes"]} == {"Bedroom", "Camera", "Light"}
+    client.run_tool("node_delete", {"nodes": ["Bedroom", "Camera", "Light"]})
+
+    res = client.run_tool("import_mesh", {"path": room.as_posix(), "post_scale": 0.1, "drop_empties": True,
+                                          "glass": ["Windows"], "drop_to_floor": True})
+    assert res["bbox"]["size"] == pytest.approx([1143, 475.3, 1143], abs=0.1) and res["bbox"]["min"][1] == 0
+    assert "suggested_scale" not in res and res["warnings"] == []
+    assert res["removed_empty_nodes"] == ["Camera", "Light"]
+    assert [n["label"] for n in client.run_tool("scene_info")["nodes"]] == ["Bedroom"]
+    assert res["glass_surfaces"] == ["Windows"]
+    mats = {m["name"]: m for m in state(bridge)["nodes"][-1]["materials"]}
+    glass = mats["Windows"]
+    assert glass["shader"] == "Iray Uber" and glass["props"]["Refraction Weight"]["value"] == 1
+    assert glass["props"]["Thin Walled"]["value"] is True and glass["props"]["Refraction Index"]["value"] == 1
+    assert not glass.get("selected")
+    assert mats["Walls"]["shader"] == "Physically Based Rendering"  # the others keep theirs
+
+
+def test_glass_without_the_uber_preset(client, tmp_path):
+    room = write_blender_room_fbx(tmp_path / "Bedroom.fbx")
+    res = client.run_tool("import_mesh", {"path": room.as_posix(), "glass": ["Windows"]})
+    assert "glass_surfaces" not in res
+    assert any("Windows stays opaque" in w and "not installed" in w for w in res["warnings"])
 
 
 def test_rigged_fbx_imports_as_figure(client, tmp_path):

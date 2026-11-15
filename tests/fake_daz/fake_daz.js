@@ -43,6 +43,7 @@ var INHERITS = {
 	DzSpotLight: ["DzSpotLight", "DzDistantLight", "DzLight", "DzCamera", "DzNode", "DzElement"],
 	DzPointLight: ["DzPointLight", "DzLight", "DzCamera", "DzNode", "DzElement"],
 	DzGroupNode: ["DzGroupNode", "DzNode", "DzElement"],
+	DzGeometryShellNode: ["DzGeometryShellNode", "DzNode", "DzElement"],
 	DzNode: ["DzNode", "DzElement"]
 };
 
@@ -460,6 +461,9 @@ Node.prototype.removeNodeChild = function (child, inPlace) {
 };
 Node.prototype.isVisible = function () { return this.d.visible !== false; };
 Node.prototype.setVisible = function (v) { this.d.visible = !!v; changed(); };
+Node.prototype.isVisibleInRender = function () { return this.d.render_visible !== false; };
+Node.prototype.setVisibleInRender = function (v) { this.d.render_visible = !!v; changed(); };
+Node.prototype.castsShadow = function () { return this.d.cast_shadows !== false; };
 Node.prototype.isSelected = function () { return !!this.d.selected; };
 Node.prototype.select = function (on) {
 	this.d.selected = !!on;
@@ -548,8 +552,9 @@ Node.prototype.getFocalLength = function () {
 // World rotation: bones by forward kinematics, other nodes by their own
 // rotation (Y, then Z, then X, like Daz), parents ignored.
 Node.prototype.getWSRot = function () {
+	// Cameras and lights turn X (pitch) inside Y (yaw), as DazMcp.aimRotation expects.
 	var R = this.d.class === "DzBone" && this.d.origin ? boneWorld(this.d).R
-		: eulerM(valuesOf(this.d, "rotation", [0, 0, 0]), "YZX", "applied");
+		: eulerM(valuesOf(this.d, "rotation", [0, 0, 0]), this.inherits("DzCamera") ? "XZY" : "YZX", "applied");
 	return { multVec: function (v) { return new Vec(mvec(R, [v.x, v.y, v.z])); } };
 };
 Node.prototype.getObject = function () {
@@ -594,7 +599,7 @@ function norm(a) { var l = Math.sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]) ||
 function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
 
 function meshBuilder() {
-	var m = { v: [], f: [] };
+	var m = { v: [], f: [], mat: [] };
 	// adds a quad, flipped if needed so its normal points away from `inside`
 	m.quad = function (a, b, c, d, inside) {
 		var n = cross(sub(m.v[b], m.v[a]), sub(m.v[c], m.v[a]));
@@ -610,8 +615,9 @@ function fakeMesh(node) {
 	if (d.mesh_boxes) {
 		var p = node.getWSPos(), sc = node.getWSScale();
 		var R = eulerM(valuesOf(d, "rotation", [0, 0, 0]), "YZX", "applied");
-		d.mesh_boxes.forEach(function (box) {
+		d.mesh_boxes.forEach(function (box, bi) {
 			var base = m.v.length, c = [0, 0, 0];
+			for (var q6 = 0; q6 < 6; q6++) { m.mat.push((d.mesh_box_materials || [])[bi] || 0); }
 			for (var i = 0; i < 8; i++) {
 				var l = [box[i & 1 ? 1 : 0][0], box[i & 2 ? 1 : 0][1], box[i & 4 ? 1 : 0][2]];
 				var w = mvec(R, [l[0] * sc, l[1] * sc, l[2] * sc]);
@@ -657,7 +663,8 @@ function fakeMesh(node) {
 		getNumFacets: function () { return m.f.length; },
 		getFacet: function (i) {
 			var f = m.f[i];
-			return { vertIdx1: f[0], vertIdx2: f[1], vertIdx3: f[2], vertIdx4: f.length > 3 ? f[3] : -1 };
+			return { vertIdx1: f[0], vertIdx2: f[1], vertIdx3: f[2], vertIdx4: f.length > 3 ? f[3] : -1,
+				materialIndex: m.mat[i] || 0 };
 		}
 	};
 }
@@ -667,7 +674,9 @@ function material(m) {
 	host.getName = function () { return m.name; };
 	host.getLabel = function () { return m.label || m.name; };
 	host.getMaterialName = function () { return m.shader || "Iray Uber"; };
-	host.className = function () { return "DzUberIrayMaterial"; };
+	host.className = function () { return m.cls || "DzUberIrayMaterial"; };
+	host.select = function (on) { m.selected = !!on; saveState(); };
+	host.isSelected = function () { return !!m.selected; };
 	return host;
 }
 
@@ -959,6 +968,15 @@ function openContent(file) {
 		});
 	}
 	if (fake.materials && target) { applyMaterials(target, fake.materials); }
+	if (fake.shader && target) {
+		// A shader preset: it changes the selected surfaces of the selected node.
+		(target.d.materials || []).forEach(function (m) {
+			if (!m.selected) { return; }
+			m.shader = fake.shader.name;
+			m.cls = fake.shader.cls;
+			Object.keys(fake.shader.props).forEach(function (k) { m.props[k] = JSON.parse(JSON.stringify(fake.shader.props[k])); });
+		});
+	}
 	if (added) { Scene.selectAllNodes(false); added.select(true); }
 	changed();
 	return true;
@@ -1088,7 +1106,9 @@ var renderMgr = {
 			max_time: state.renderProps["Max Time (secs)"].value,
 			lights: state.nodes.filter(function (n) { return /Light$/.test(n.class); }).length,
 			environment_mode: state.renderProps["Environment Mode"].items[state.renderProps["Environment Mode"].value],
-			figures: renderSummary(cam && cam.inherits("DzCamera") && byId(cam.d.id) ? cam : null)
+			figures: renderSummary(cam && cam.inherits("DzCamera") && byId(cam.d.id) ? cam : null),
+			not_in_render: state.nodes.filter(function (n) { return n.render_visible === false; })
+				.map(function (n) { return n.label; })
 		});
 		saveState();
 		return true;
@@ -1364,7 +1384,15 @@ function parseFbx(file) {
 		nodes.push(r.node);
 		pos = r.next;
 	}
-	var unit = 1, verts = [], mats = [], bones = [];
+	var unit = 1, verts = [], mats = [], bones = [], empties = [], meshModel = null;
+	function p70(o) {
+		var out = {};
+		o.children.forEach(function (c) {
+			if (c.name !== "Properties70") { return; }
+			c.children.forEach(function (pp) { out[pp.props[0]] = pp.props.slice(4); });
+		});
+		return out;
+	}
 	nodes.forEach(function (n) {
 		if (n.name === "GlobalSettings") {
 			n.children.forEach(function (c) {
@@ -1379,16 +1407,35 @@ function parseFbx(file) {
 					o.children.forEach(function (c) { if (c.name === "Vertices") { verts = verts.concat(c.props[0]); } });
 				} else if (o.name === "Material") { mats.push(nm); }
 				else if (o.name === "Model" && o.props[2] === "LimbNode") { bones.push(nm); }
+				else if (o.name === "Model" && o.props[2] === "Mesh" && !meshModel) { meshModel = p70(o); }
+				else if (o.name === "Model") { empties.push(nm); }
 			});
 		}
 	});
+	// Like Daz: the mesh model's Lcl Scaling and Lcl Rotation (X, then Y, then Z)
+	// place the vertices. The fake bakes them into the box, the real Daz keeps
+	// them on the node.
+	var S = (meshModel && meshModel["Lcl Scaling"]) || [1, 1, 1];
+	var Rd = (meshModel && meshModel["Lcl Rotation"]) || [0, 0, 0];
+	function turn(v) {
+		var r = v.slice(), k, a, c, s2, t;
+		for (k = 0; k < 3; k++) {
+			a = Rd[k] * Math.PI / 180; c = Math.cos(a); s2 = Math.sin(a);
+			if (k === 0) { t = [r[0], c * r[1] - s2 * r[2], s2 * r[1] + c * r[2]]; }
+			else if (k === 1) { t = [c * r[0] + s2 * r[2], r[1], -s2 * r[0] + c * r[2]]; }
+			else { t = [c * r[0] - s2 * r[1], s2 * r[0] + c * r[1], r[2]]; }
+			r = t;
+		}
+		return r;
+	}
 	var mn = null, mx = null;
 	for (var i = 0; i + 2 < verts.length; i += 3) {
-		var v = [verts[i] * unit, verts[i + 1] * unit, verts[i + 2] * unit];
+		var v = turn([verts[i] * S[0], verts[i + 1] * S[1], verts[i + 2] * S[2]]);
+		v = [v[0] * unit, v[1] * unit, v[2] * unit];
 		if (!mn) { mn = v.slice(); mx = v.slice(); }
 		for (var j = 0; j < 3; j++) { mn[j] = Math.min(mn[j], v[j]); mx[j] = Math.max(mx[j], v[j]); }
 	}
-	return { bbox: [mn, mx], materials: mats.length ? mats : ["default"], bones: bones };
+	return { bbox: [mn, mx], materials: mats.length ? mats : ["default"], bones: bones, empties: empties, pbr: true };
 }
 
 function makeImporter(cls, ext) {
@@ -1418,10 +1465,19 @@ function makeImporter(cls, ext) {
 				class: mesh.bones.length ? "DzFigure" : "DzNode", label: label, name: label.replace(/\W/g, "_"),
 				geometry: true, bbox_local: mesh.bbox, position: [0, 0, 0], rotation: [0, 0, 0],
 				imported_from: file,
-				materials: mesh.materials.map(function (m) { return { name: m, label: m, shader: "Iray Uber", props: clothProps([0.7, 0.7, 0.7]) }; })
+				// the FBX importer gives the PBR shader, which has no refraction
+				materials: mesh.materials.map(function (m) {
+					return mesh.pbr ? { name: m, label: m, shader: "Physically Based Rendering", cls: "DzPbrMaterial",
+						props: { "Base Color": { type: "color", value: [0.8, 0.8, 0.8], mappable: true, map: null },
+							"Roughness": { type: "float", value: 0.5, min: 0, max: 1, mappable: true } } }
+						: { name: m, label: m, shader: "Iray Uber", props: clothProps([0.7, 0.7, 0.7]) };
+				})
 			};
 			var node = new Node(d);
 			Scene.addNode(node);
+			(mesh.empties || []).forEach(function (e) {
+				Scene.addNode(new Node({ class: "DzNode", label: uniqueLabel(e), name: e, position: [0, 0, 0], rotation: [0, 0, 0] }));
+			});
 			mesh.bones.forEach(function (b) {
 				Scene.addNode(new Node({ class: "DzBone", name: b, label: b, parent: d.id, skel: d.id, position: [0, 0, 0], rotation: [0, 0, 0] }));
 			});

@@ -137,11 +137,12 @@ script. Es más lento pero no necesita compilar nada.
 | `render_settings` | Tamaño de imagen y límites de Iray |
 | `render` | Renderiza a un archivo y devuelve la imagen |
 | `render_shots` | Renderiza una conversación como serie de planos (caras, miradas y cámara por línea) para novelas visuales |
+| `render_cull` | Deja fuera del render lo que la cámara no ve (fuera de cuadro, detrás de ella, ropa bajo otra ropa) y conserva lo que aún afecta a la luz; `cull=true` en `render`, `render_shots` y `render_animation` lo hace por plano |
 | `render_animation` | Renderiza cada cuadro de la animación y los une en un MP4 o GIF |
 | `run_script` | Ejecuta DazScript para todo lo demás (se puede desactivar) |
 | `daz_guide` | Devuelve las skills como texto para agentes sin soporte de skills |
 
-Skills: `daz-basics`, `scene-building`, `characters`, `faces`, `furniture-poses`, `dialogue-scenes`, `rendering`, `third-party-assets`, `animation`.
+Skills: `daz-basics`, `scene-building`, `characters`, `faces`, `furniture-poses`, `dialogue-scenes`, `rendering`, `render-culling`, `third-party-assets`, `animation`.
 
 Pruébalo: *"Abre ~/Documents/escena.duf en Daz, describe la escena y muéstrame una captura."*
 O: *"Monta una escena con dos personajes Genesis 9, vestidos y posados,

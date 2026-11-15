@@ -33,12 +33,14 @@ def client(bridge, content_library):
     return c
 
 
-def add_prop(bridge, label, boxes, position, rotation):
+def add_prop(bridge, label, boxes, position, rotation, cls="DzNode", parent=None):
     state = json.loads(bridge.state.read_text())
     node_id = state["nextId"]
     state["nextId"] = node_id + 1
     xs = [p for b in boxes for p in (b[0], b[1])]
-    state["nodes"].append({"id": node_id, "class": "DzNode", "label": label, "name": label, "parent": None,
+    if parent is not None:
+        parent = next(n["id"] for n in state["nodes"] if n["label"] == parent)
+    state["nodes"].append({"id": node_id, "class": cls, "label": label, "name": label, "parent": parent,
                            "position": position, "rotation": rotation, "mesh_boxes": boxes,
                            "bbox": [[position[0] - 30, 0, position[2] - 30], [position[0] + 30, max(p[1] for p in xs),
                                                                               position[2] + 30]]})
@@ -130,3 +132,26 @@ def test_joint_limits(client):
     res = client.run_tool("pose_bones", {"figure": "Genesis 9", "bones": {"spine1": [0, 30, 0]},
                                          "ignore_limits": True})
     assert res["set"][0]["rotation"] == [0, 30, 0] and "clamped" not in res
+
+
+def test_prop_surfaces_on_a_model_turned_on_its_side(client, bridge):
+    # Modeled Z-up (Blender) and stood up with -90 on X, as an FBX import does:
+    # its local Z points up, so its own X and Y are the level directions.
+    add_prop(bridge, "Bed", [[[-80, -100, 0], [80, 100, 50]]], position=[0, 0, 300], rotation=[-90, 0, 0])
+    top = client.run_tool("prop_surfaces", {"node": "Bed"})["surfaces"][0]
+    assert top["height"] == 50
+    assert sorted(top["size_cm"]) == [160, 200]
+
+
+def test_fit_check_leaves_out_the_figures_own_shells(client, bridge):
+    sit(client)
+    client.run_tool("place_on", {"figure": "Genesis 9", "prop": "Chair", "check": False})
+    fig_box = client.run_tool("node_set", {"node": "Genesis 9"})["bbox_ws"]
+    shell = [fig_box["min"], fig_box["max"]]
+    add_prop(bridge, "Genesis 9 Toon Outline", [shell], position=[0, 0, 0], rotation=[0, 0, 0],
+             cls="DzGeometryShellNode", parent="Genesis 9")
+    add_prop(bridge, "Cup", [[[-4, 0, -4], [4, 10, 4]]], position=fig_box["min"], rotation=[0, 0, 0],
+             parent="Genesis 9")
+    fit = client.run_tool("fit_check", {"figure": "Genesis 9"})
+    assert [a["node"] for a in fit["against"]] == ["Chair"]
+    assert sorted(fit["skipped_own"]) == ["Cup", "Genesis 9 Toon Outline"]
