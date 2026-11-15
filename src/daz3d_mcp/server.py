@@ -36,6 +36,8 @@ light_create and environment_set set up the shot; render makes the final image.
 Dialogue scenes (visual novels): camera_shot frames a close-up, over the shoulder
 or two shot on a face, on one side of the line between the two speakers;
 render_shots renders a whole conversation, one image per line.
+Clothes from another Genesis generation: answer the Auto-Fit dialog with Accept,
+then wearable_refit checks and repairs shoes that ended up misplaced.
 Lighter renders: render_cull leaves out of the render what a camera cannot see
 (out of the picture, behind it, under other clothing); render, render_shots and
 render_animation do it per shot with cull=true.
@@ -49,7 +51,8 @@ and anim_offset change speed, timing and place; anim_foot_contact and
 anim_preview check the result.
 If your client has no skills, read the guides with daz_guide first: daz-basics,
 then scene-building, characters, faces, furniture-poses, dialogue-scenes,
-rendering, render-culling, third-party-assets and animation.
+rendering, render-culling, cross-generation-clothing, third-party-assets and
+animation.
 run_script runs free DazScript (ES5 JavaScript) for anything the named tools
 do not cover; prefer the named tools when they exist.
 """

@@ -116,6 +116,7 @@ It is slower but needs nothing compiled.
 | `content_add_library` | Adds a folder to Daz Studio's content libraries |
 | `mesh_inspect` / `import_mesh` | Reads an OBJ or FBX (size, units, textures) / imports it at the right size, without dialogs |
 | `wearable_from_mesh` | Turns an imported garment into clothing that follows a figure (Transfer Utility) |
+| `wearable_refit` | Checks and repairs shoes made for another Genesis generation after Auto-Fit (foot flat through a heeled shoe, shoe under the floor): poses the feet as the shoe's file asks, keeps the shoe's shape, restores its weights, stands the figure on its soles |
 | `wearable_adjust` | Mesh smoothing and collision of clothing (fixes skin poking through) |
 | `anim_timeline` | Frame rate, frame range, current frame, and what is animated |
 | `anim_keys_set` / `anim_keys_get` / `anim_keys_delete` | Keyframes on bones, the hip, nodes, morphs and any number property |
@@ -139,7 +140,7 @@ It is slower but needs nothing compiled.
 | `run_script` | Runs DazScript for anything else (can be disabled) |
 | `daz_guide` | Returns the skills as text for agents without skills support |
 
-Skills: `daz-basics`, `scene-building`, `characters`, `faces`, `furniture-poses`, `dialogue-scenes`, `rendering`, `render-culling`, `third-party-assets`, `animation`.
+Skills: `daz-basics`, `scene-building`, `characters`, `faces`, `furniture-poses`, `dialogue-scenes`, `rendering`, `render-culling`, `cross-generation-clothing`, `third-party-assets`, `animation`.
 
 Try it: *"Open ~/Documents/scene.duf in Daz, describe the scene and show me a capture."*
 Or: *"Build a scene with two Genesis 9 characters, dressed and posed, talking

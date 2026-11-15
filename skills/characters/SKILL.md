@@ -48,6 +48,10 @@ viewport_capture()
 - If `content_load` warns that an item is not fitted, it was made for another
   generation. Prefer an item for the right generation; `wearable_fit(item,
   figure)` forces a fit but results vary.
+- If `content_load` stops on an **Auto-Fit** dialog, the item is for another
+  generation and Daz offers to convert it. Read `cross-generation-clothing`:
+  accept it, then check shoes with `wearable_refit` (they usually end up
+  misplaced).
 - A complete outfit is usually a top, a bottom (or a dress), shoes, and hair.
   Many outfits come as several files in one folder: search the folder.
 - Removing an item: `node_delete(nodes=["Item label"])`.

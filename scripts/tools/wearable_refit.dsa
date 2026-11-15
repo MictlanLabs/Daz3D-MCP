@@ -1,0 +1,441 @@
+// Tool: wearable_refit
+// Checks and repairs how footwear (or another worn item) sits on a figure,
+// above all an item made for another Genesis generation that Auto-Fit
+// converted: the foot flat through a heeled shoe, the shoe under the floor.
+//
+// What it does, in order (action "fix"):
+//   1. weights: puts back the weights the item's author painted (translated
+//      to this figure's bone names by the server) in place of the ones
+//      Auto-Fit projected from the skin.
+//   2. pose: turns the figure's bones the way the item needs (the heel pose
+//      its own file carries, translated by the server).
+//   3. keep_shape: the item was modeled around the posed foot, and after
+//      Auto-Fit it shows that shape while the figure's feet are unposed.
+//      Posing the feet would bend it. A morph ("MCP Shape Keep") is built so
+//      that with the pose on the item is, vertex by vertex, where it was
+//      designed to be; from then on it moves with the foot.
+//   4. ground: lifts the figure so the soles stand where the bare feet stood.
+//
+// args:
+//   item        (string, required) label of the worn item
+//   figure      (string) the figure; default the one the item is fitted to
+//   action      "check" (default) or "fix"
+//   pose        ({bone: [x, y, z]}) rotations for the figure's bones
+//   weights     ({bone: [[vertex, weight], ...]}) authored weights
+//   vertex_count (int) vertices the weights were written for
+//   keep_shape  (bool, default true)
+//   ground      (bool, default true)
+//   floor_y     (number) floor height; default where the bare feet were
+
+var KEEP = "MCP Shape Keep";
+
+function itemVerts(item) {
+	var g = DazMcp.cachedMesh(item);
+	var n = g ? g.getNumVertices() : 0;
+	var a = [], i, v;
+	for (i = 0; i < n; i++) { v = g.getVertex(i); a.push(v.x, v.y, v.z); }
+	return a;
+}
+
+function lowestY(a) {
+	var low = null, i;
+	for (i = 1; i < a.length; i += 3) { if (low === null || a[i] < low) { low = a[i]; } }
+	return low;
+}
+
+function findKeep(item) {
+	var o = item.getObject(), i, m;
+	if (!o) { return null; }
+	for (i = 0; i < o.getNumModifiers(); i++) {
+		m = o.getModifier(i);
+		if (String(m.getName()) === KEEP) { return m; }
+	}
+	return null;
+}
+
+function median(list) {
+	var s = list.slice(0).sort(function (a, b) { return a - b; });
+	return s.length ? s[Math.floor(s.length / 2)] : null;
+}
+
+// How much of the item hangs from foot bones (0..1), by vertices affected.
+function footShare(item) {
+	var sb, i, bb, wm, n, feet = 0, all = 0, bones = {};
+	try { sb = item.getSkinBinding(); } catch (e) { sb = null; }
+	if (!sb) { return null; }
+	for (i = 0; i < sb.getNumBoneBindings(); i++) {
+		bb = sb.getBoneBinding(i);
+		wm = bb.getWeights();
+		if (!wm || !wm.hasNonZeroWeight()) { continue; }
+		n = wm.getNumAffected();
+		if (!n) { n = 1; }
+		all += n;
+		bones[String(bb.getBone().getName())] = n;
+		if (/foot|toe|metatars/i.test(String(bb.getBone().getName()))) { feet += n; }
+	}
+	return { share: all ? feet / all : 0, bones: bones };
+}
+
+// The soles of the feet against the item, per foot. The sole is the lowest
+// skin point of each 1.5 cm cell of the foot seen from above.
+function soleReport(fig, item) {
+	var pts = DazMcp.bodySamples(fig, { max: 200000, parts: { left_foot: true, right_foot: true } });
+	var tris = DazMcp.meshTriangles([item]);
+	var grid = DazMcp.triGrid(tris, 1, 2);
+	var cells = { left_foot: {}, right_foot: {} };
+	var out = {}, i, key, c, side, p, hits, k, minT, below, gaps, r = DazMcp.round;
+	var n, through, floating, on, covered;
+	for (i = 0; i < pts.x.length; i++) {
+		c = cells[pts.part[i]];
+		if (!c) { continue; }
+		key = Math.floor(pts.x[i] / 1.5) + "," + Math.floor(pts.z[i] / 1.5);
+		if (!c[key] || pts.y[i] < c[key][1]) { c[key] = [pts.x[i], pts.y[i], pts.z[i]]; }
+	}
+	for (side in cells) {
+		if (!cells.hasOwnProperty(side)) { continue; }
+		n = 0; through = 0; floating = 0; on = 0; covered = 0; gaps = [];
+		for (key in cells[side]) {
+			if (!cells[side].hasOwnProperty(key)) { continue; }
+			p = cells[side][key];
+			n++;
+			hits = DazMcp.gridHits(grid, p);
+			minT = null;
+			below = null;
+			for (k = 0; k < hits.length; k++) {
+				if (Math.abs(hits[k].t - p[1]) > 15) { continue; }
+				if (minT === null || hits[k].t < minT) { minT = hits[k].t; }
+				if (hits[k].t <= p[1] + 0.05 && (below === null || hits[k].t > below)) { below = hits[k].t; }
+			}
+			if (minT === null) { continue; }
+			covered++;
+			if (p[1] < minT - 0.3) { through++; continue; }
+			if (below === null) { continue; }
+			gaps.push(p[1] - below);
+			if (p[1] - below > 1.5) { floating++; } else { on++; }
+		}
+		out[side.replace("_foot", "")] = {
+			sole_points: n,
+			under_foot: n ? r(covered / n, 2) : 0,
+			through_sole: covered ? r(through / covered, 2) : 0,
+			floating: covered ? r(floating / covered, 2) : 0,
+			resting: covered ? r(on / covered, 2) : 0,
+			median_gap_cm: gaps.length ? r(median(gaps), 1) : null,
+			max_gap_cm: gaps.length ? r(Math.max.apply(null, gaps), 1) : null
+		};
+	}
+	return out;
+}
+
+function footLowest(fig) {
+	var low = DazMcp.lowestPoints(fig, { left_foot: true, right_foot: true });
+	var y = null, k;
+	for (k in low) { if (low.hasOwnProperty(k) && (y === null || low[k][1] < y)) { y = low[k][1]; } }
+	return y;
+}
+
+function report(fig, item) {
+	var share = footShare(item);
+	var style = DazMcp.findBone(fig, "l_foot") ? "genesis9" : (DazMcp.findBone(fig, "lFoot") ? "genesis8" : null);
+	var footName = style === "genesis8" ? ["lFoot", "rFoot", "lToe", "rToe"] : ["l_foot", "r_foot", "l_toes", "r_toes"];
+	var rot = {}, i, b, feet, side, problems = [], f, verts, r = DazMcp.round;
+	var looksFootwear = /shoe|boot|sandal|heel|sneaker|slipper|pump|loafer|footwear|flat|clog|mule|zapat|bota/i
+		.test(item.getLabel() + " " + item.getName());
+	var isFootwear = share ? share.share > 0.5 : looksFootwear;
+	for (i = 0; i < footName.length; i++) {
+		b = DazMcp.findBone(fig, footName[i]);
+		if (b) {
+			rot[footName[i]] = [r(b.getXRotControl().getValue(), 1), r(b.getYRotControl().getValue(), 1),
+				r(b.getZRotControl().getValue(), 1)];
+		}
+	}
+	verts = itemVerts(item);
+	feet = soleReport(fig, item);
+	if (isFootwear) {
+		for (side in feet) {
+			if (!feet.hasOwnProperty(side)) { continue; }
+			f = feet[side];
+			if (f.under_foot < 0.3) {
+				problems.push({ code: "not_under_foot", foot: side, text: "Only " + Math.round(f.under_foot * 100) +
+					" % of the " + side + " sole has the item under it: it is not on the foot." });
+			} else if (f.through_sole > 0.1) {
+				problems.push({ code: "foot_through_sole", foot: side, text: Math.round(f.through_sole * 100) +
+					" % of the " + side + " sole is below the item's sole: the foot goes through it." });
+			} else if (f.floating > 0.4) {
+				problems.push({ code: "foot_floating", foot: side, text: Math.round(f.floating * 100) +
+					" % of the " + side + " sole floats more than 1.5 cm above the item (median " + f.median_gap_cm +
+					" cm): the foot is not in the pose the item was made for." });
+			}
+		}
+	}
+	return {
+		item: item.getLabel(),
+		item_name: String(item.getName()),
+		figure: fig.getLabel(),
+		generation: DazMcp.generation(fig),
+		bone_style: style,
+		footwear: isFootwear,
+		foot_weight_share: share ? r(share.share, 2) : null,
+		vertices: verts.length / 3,
+		feet: feet,
+		foot_rotation: rot,
+		lowest_cm: { item: verts.length ? r(lowestY(verts), 1) : null, bare_feet: r(footLowest(fig), 1) },
+		shape_keep: !!findKeep(item),
+		problems: problems,
+		verdict: problems.length ? "misplaced" : "ok"
+	};
+}
+
+function applyWeights(item, weights, vertexCount) {
+	var sb, n, i, bb, wm, name, a, v, cur, want, byBone = {}, k, map, done = [], auto;
+	try { sb = item.getSkinBinding(); } catch (e) { sb = null; }
+	if (!sb) { return { applied: false, why: "The item has no skin binding." }; }
+	n = item.getObject().getCurrentShape().getFacetMesh().getNumVertices();
+	if (vertexCount && vertexCount !== n) {
+		return { applied: false, why: "The file's weights are for " + vertexCount + " vertices; the item has " + n + "." };
+	}
+	for (i = 0; i < sb.getNumBoneBindings(); i++) { byBone[String(sb.getBoneBinding(i).getBone().getName())] = true; }
+	for (k in weights) {
+		if (weights.hasOwnProperty(k) && !byBone[k]) { return { applied: false, why: "The item has no bone " + k + "." }; }
+	}
+	auto = sb.getAutoNormalizeGeneralMaps();
+	sb.setAutoNormalizeGeneralMaps(false);
+	for (i = 0; i < sb.getNumBoneBindings(); i++) {
+		bb = sb.getBoneBinding(i);
+		wm = bb.getWeights();
+		if (!wm) { continue; }
+		name = String(bb.getBone().getName());
+		map = {};
+		a = weights.hasOwnProperty(name) ? weights[name] : null;
+		if (a) {
+			for (v = 0; v < a.length; v++) { map[a[v][0]] = a[v][1]; }
+			done.push(name);
+		} else if (!wm.hasNonZeroWeight()) {
+			continue;
+		}
+		if (wm.getNumWeights() !== n) { wm.setNumWeights(n); }
+		for (v = 0; v < n; v++) {
+			cur = wm.getFloatWeight(v);
+			want = map[v] || 0;
+			if (cur !== want) { wm.setFloatWeight(v, want); }
+		}
+	}
+	sb.setAutoNormalizeGeneralMaps(auto);
+	try { sb.invalidate(); } catch (e2) { /* older API */ }
+	// without this the scene file keeps the weights Auto-Fit made
+	try { sb.modifyAsset(); } catch (e3) { /* older API */ }
+	return { applied: true, bones: done };
+}
+
+function setRot(bone, rot) {
+	var ctl = [bone.getXRotControl(), bone.getYRotControl(), bone.getZRotControl()];
+	var i, got = [];
+	for (i = 0; i < 3; i++) {
+		ctl[i].setValue(rot[i]);
+		got.push(DazMcp.round(ctl[i].getValue(), 2));
+	}
+	return got;
+}
+
+function getRot(bone) {
+	return [bone.getXRotControl().getValue(), bone.getYRotControl().getValue(), bone.getZRotControl().getValue()];
+}
+
+function quatInfo(bone) {
+	var p = bone.getWSPos();
+	var q = null;
+	try { q = bone.getWSRot(); } catch (e) { q = null; }
+	return { pos: [p.x, p.y, p.z], rot: q };
+}
+
+// Builds the morph that keeps the item where it is now once `pose` is on.
+function keepShape(fig, item, pose) {
+	var bones = DazMcp.bones(fig);
+	var saved = [], i, b, name, inPose = {}, roots = [], par, T, n, P, D, m, ch, deltas, iter, mx, prev = null, worse = 0;
+	var o = item.getObject(), k, e, v, best, bd, d, scale = 1, figInv = null, log = [], set = {}, x, y, z, j;
+	for (name in pose) { if (pose.hasOwnProperty(name)) { inPose[name] = true; } }
+	// everything else unposed while we measure, so the item's vertices move
+	// only by the bones we turn
+	for (i = 0; i < bones.length; i++) {
+		b = bones[i];
+		saved.push({ bone: b, rot: getRot(b) });
+		setRot(b, [0, 0, 0]);
+	}
+	for (name in pose) {
+		if (!pose.hasOwnProperty(name)) { continue; }
+		b = DazMcp.findBone(fig, name);
+		roots.push({ bone: b, zero: quatInfo(b) });
+	}
+	T = itemVerts(item);
+	n = T.length / 3;
+	for (name in pose) {
+		if (pose.hasOwnProperty(name)) { set[name] = setRot(DazMcp.findBone(fig, name), pose[name]); }
+	}
+	for (i = 0; i < roots.length; i++) { roots[i].posed = quatInfo(roots[i].bone); }
+	if (!roots.length) { return { state: "not_needed" }; }
+	try { scale = fig.getWSScale().x || 1; } catch (e0) { scale = 1; }
+	try { figInv = fig.getWSRot().inverse(); } catch (e1) { figInv = null; }
+
+	// which turned bone carries each vertex: the one whose turn best explains
+	// where the vertex went
+	P = itemVerts(item);
+	var owner = [];
+	var moved = function (r, v) {
+		var w = new DzVec3(T[v * 3] - r.zero.pos[0], T[v * 3 + 1] - r.zero.pos[1], T[v * 3 + 2] - r.zero.pos[2]);
+		try { w = r.posed.rot.multVec(r.zero.rot.inverse().multVec(w)); } catch (e6) { /* unrotated */ }
+		return [r.posed.pos[0] + w.x, r.posed.pos[1] + w.y, r.posed.pos[2] + w.z];
+	};
+	for (v = 0; v < n; v++) {
+		best = 0;
+		bd = 1e30;
+		for (i = 0; i < roots.length; i++) {
+			k = moved(roots[i], v);
+			x = P[v * 3] - k[0]; y = P[v * 3 + 1] - k[1]; z = P[v * 3 + 2] - k[2];
+			d = x * x + y * y + z * z;
+			if (d < bd) { bd = d; best = i; }
+		}
+		owner.push(best);
+	}
+	var undo = function (r, vec) {
+		// the world error, taken back through the bone's turn and the figure's
+		// own rotation, is the change to make before skinning
+		var w = vec;
+		try { w = r.zero.rot.multVec(r.posed.rot.inverse().multVec(w)); } catch (e2) { w = vec; }
+		if (figInv) { try { w = figInv.multVec(w); } catch (e3) { /* unrotated */ } }
+		return w;
+	};
+
+	D = [];
+	for (i = 0; i < n * 3; i++) { D.push(0); }
+	mx = 0;
+	for (i = 0; i < n * 3; i++) { if (Math.abs(T[i] - P[i]) > mx) { mx = Math.abs(T[i] - P[i]); } }
+	var result = { pose: set, moved_cm: DazMcp.round(mx, 2) };
+	if (mx < 0.02) {
+		result.state = "not_needed";
+	} else {
+		m = new DzMorph();
+		m.setName(KEEP);
+		try { m.setLabel("Shape Keep (wearable_refit)"); } catch (e4) { /* name only */ }
+		ch = m.getValueChannel();
+		ch.setValue(1);
+		o.addModifier(m, 0);
+		deltas = m.getDeltas();
+		try { deltas.setVertCount(n); } catch (e5) { /* set by the object */ }
+		result.state = "kept";
+		for (iter = 0; iter < 30; iter++) {
+			P = itemVerts(item);
+			mx = 0;
+			for (v = 0; v < n; v++) {
+				e = new DzVec3(T[v * 3] - P[v * 3], T[v * 3 + 1] - P[v * 3 + 1], T[v * 3 + 2] - P[v * 3 + 2]);
+				d = Math.max(Math.abs(e.x), Math.abs(e.y), Math.abs(e.z));
+				if (d > mx) { mx = d; }
+				e = undo(roots[owner[v]], e);
+				D[v * 3] += e.x / scale; D[v * 3 + 1] += e.y / scale; D[v * 3 + 2] += e.z / scale;
+			}
+			log.push(DazMcp.round(mx, 3));
+			if (mx < 0.005) { break; }
+			if (prev !== null && mx > prev * 1.2) { worse++; } else { worse = 0; }
+			if (worse >= 3) { result.state = "failed"; break; }
+			prev = mx;
+			deltas.removeAllDeltas();
+			for (v = 0; v < n; v++) {
+				if (D[v * 3] || D[v * 3 + 1] || D[v * 3 + 2]) {
+					deltas.addDelta(v, new DzVec3(D[v * 3], D[v * 3 + 1], D[v * 3 + 2]), false);
+				}
+			}
+			ch.setValue(0);
+			ch.setValue(1);
+		}
+		result.error_cm = DazMcp.round(mx, 3);
+		result.passes = log.length;
+		if (result.state === "failed") { o.removeModifier(m); }
+	}
+	// back to the pose the figure had, with the new one on top
+	for (j = 0; j < saved.length; j++) {
+		if (!inPose[String(saved[j].bone.getName())]) { setRot(saved[j].bone, saved[j].rot); }
+	}
+	return result;
+}
+
+function dazmcpTool(args) {
+	var item = DazMcp.requireNode(args.item, "item");
+	var fig, before, out, name, b, missing = [], pose = args.pose || null, k, old, verts, low, floor, dy, pos, has = false;
+	if (DazMcp.nodeType(item) === "bone") { item = DazMcp.ownerFigure(item); }
+	if (args.figure) {
+		fig = DazMcp.requireFigure(args.figure);
+		if (DazMcp.nodeType(fig) === "fitted_figure") { fig = fig.getFollowTarget(); }
+	} else {
+		fig = DazMcp.nodeType(item) === "fitted_figure" ? item.getFollowTarget() : null;
+		if (!fig) {
+			throw DazMcp.fail("not_fitted", args.item + " is not fitted to a figure. Fit it first (content_load " +
+				"with a target, or wearable_fit) or pass figure.");
+		}
+	}
+	if (DazMcp.same(fig, item)) { throw DazMcp.fail("bad_args", "item and figure are the same node."); }
+	if (!DazMcp.cachedMesh(item)) { throw DazMcp.fail("bad_args", args.item + " has no mesh."); }
+
+	before = report(fig, item);
+	if (args.action !== "fix") { return before; }
+
+	out = { item: before.item, figure: before.figure, before: { feet: before.feet, problems: before.problems,
+		lowest_cm: before.lowest_cm, verdict: before.verdict }, done: [], notes: [] };
+
+	if (pose) {
+		for (name in pose) {
+			if (!pose.hasOwnProperty(name)) { continue; }
+			has = true;
+			b = DazMcp.findBone(fig, name);
+			if (!b) { missing.push(name); }
+		}
+		if (missing.length) {
+			throw DazMcp.fail("bad_args", fig.getLabel() + " has no bone " + missing.join(", ") + ".", { not_found: missing });
+		}
+		if (!has) { pose = null; }
+	}
+
+	// start from the item as Auto-Fit left it
+	old = findKeep(item);
+	if (old) {
+		item.getObject().removeModifier(old);
+		out.notes.push("Removed the earlier " + KEEP + " morph first.");
+	}
+
+	if (args.weights) {
+		out.weights = applyWeights(item, args.weights, args.vertex_count);
+		if (out.weights.applied) { out.done.push("weights"); }
+	}
+
+	if (pose && args.keep_shape !== false) {
+		out.keep_shape = keepShape(fig, item, pose);
+		out.done.push("pose");
+		if (out.keep_shape.state === "kept") { out.done.push("keep_shape"); }
+		if (out.keep_shape.state === "failed") {
+			out.notes.push("The shape could not be kept (the passes did not settle): the item follows the bones as " +
+				"Auto-Fit rigged it.");
+		}
+	} else if (pose) {
+		out.pose = {};
+		for (name in pose) { if (pose.hasOwnProperty(name)) { out.pose[name] = setRot(DazMcp.findBone(fig, name), pose[name]); } }
+		out.done.push("pose");
+	}
+
+	if (args.ground !== false && before.footwear) {
+		verts = itemVerts(item);
+		low = lowestY(verts);
+		floor = (args.floor_y !== undefined && args.floor_y !== null) ? args.floor_y : before.lowest_cm.bare_feet;
+		dy = floor - low;
+		if (Math.abs(dy) > 0.05) {
+			try {
+				pos = fig.getWSPos();
+				fig.setWSPos(new DzVec3(pos.x, pos.y + dy, pos.z));
+			} catch (e) {
+				fig.getYPosControl().setValue(fig.getYPosControl().getValue() + dy);
+			}
+			out.ground = { floor_y: DazMcp.round(floor, 1), moved_up_cm: DazMcp.round(dy, 1) };
+			out.done.push("ground");
+		}
+	}
+
+	out.after = report(fig, item);
+	out.verdict = out.after.verdict;
+	return out;
+}

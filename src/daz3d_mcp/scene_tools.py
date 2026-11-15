@@ -4,6 +4,7 @@ materials and rendering."""
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 from typing import Annotated, Any, Awaitable, Callable, Literal
@@ -16,7 +17,7 @@ from pydantic import BaseModel, Field
 
 from daz3d_mcp.client import DazClient
 from daz3d_mcp.content import KINDS, ContentIndex, thumbnail_of
-from daz3d_mcp import cull_tools, video
+from daz3d_mcp import cull_tools, refit, video
 from daz3d_mcp.paths import config_dir
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
@@ -95,7 +96,7 @@ def _clean(**kwargs) -> dict:
 def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient],
              culler: cull_tools.Culler | None = None) -> Callable[[], None]:
     """Adds the tools; returns a function that forgets the cached libraries and index."""
-    state: dict[str, Any] = {"libraries": None, "index": None}
+    state: dict[str, Any] = {"libraries": None, "index": None, "wearables": []}
     culls = culler or cull_tools.Culler(call)
 
     def forget() -> None:
@@ -390,6 +391,124 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient],
     ) -> dict:
         """Fits clothing or hair already in the scene to a figure (Daz "Fit To"), or unfits it."""
         return await call("wearable_fit", _clean(item=item, figure=figure))
+
+    def _refit_source(idx: ContentIndex, check: dict, source: str | None) -> dict:
+        """What the item's own files say: the pose it needs and its authored weights."""
+        label, name, style = check["item"], check.get("item_name"), check.get("bone_style")
+        info: dict[str, Any] = {"file": None}
+        candidates: list[Path] = []
+        if source:
+            resolved = idx.resolve(source)
+            if resolved is None:
+                raise ToolError(f"Content file not found: {source}.")
+            candidates = [resolved]
+        else:
+            candidates = list(state["wearables"])
+            words = re.sub(r"\s*\(\d+\)$", "", label)
+            candidates += [Path(r["path"]) for r in idx.search(words, "clothing", None, None, 20, 0)["results"]]
+        doc = asset = None
+        for path in candidates:
+            try:
+                doc = refit.read_dson(path)
+            except (OSError, ValueError):
+                continue
+            asset = refit.matches_item(doc, label, name)
+            if asset or source:
+                info["file"] = path.as_posix()
+                break
+            doc = None
+        if doc is None:
+            info["note"] = ("The file this item was loaded from was not found; pass source (the .duf path) "
+                            "or foot_pose.")
+            return info
+        pose = refit.file_pose(doc)
+        if not pose:
+            # outfits often ship the heel pose as its own file beside the shoes
+            for sib in sorted(Path(info["file"]).parent.glob("*.duf")):
+                low = sib.name.lower()
+                if ("pose" in low and "foot" in low) or "heel" in low:
+                    try:
+                        pose = refit.file_pose(refit.read_dson(sib))
+                    except (OSError, ValueError):
+                        pose = {}
+                    if pose:
+                        info["pose_file"] = sib.as_posix()
+                        break
+        if pose and style:
+            info["made_for"] = refit.bone_style(pose) or info.get("made_for")
+            info["pose"], skipped = refit.translate_pose(pose, style)
+            if skipped:
+                info["pose_bones_skipped"] = skipped
+        if asset and style:
+            dsf = refit.resolve_asset(asset["dsf"], idx.libraries)
+            if dsf is not None:
+                try:
+                    weights, count = refit.authored_weights(refit.read_dson(dsf))
+                except (OSError, ValueError):
+                    weights, count = {}, 0
+                info["made_for"] = refit.bone_style(weights) or info.get("made_for")
+                translated, why = refit.translate_weights(weights, style)
+                if translated:
+                    info["_weights"], info["_vertex_count"] = translated, count
+                elif why:
+                    info["weights_note"] = why
+        if info.get("made_for") and style:
+            info["other_generation"] = info["made_for"] != style
+        return info
+
+    @mcp.tool(annotations=CHANGES_SCENE)
+    async def wearable_refit(
+        item: Annotated[str, Field(description="Label of the shoes, boots or other worn item.")],
+        fix: Annotated[bool, Field(description="false only measures and reports; true repairs.")] = False,
+        figure: Annotated[str | None, Field(description="Default: the figure the item is fitted to.")] = None,
+        source: Annotated[str | None, Field(description="The .duf the item was loaded from, when it is not found "
+                                                        "by itself.")] = None,
+        foot_pose: Annotated[dict[str, Vec3] | Literal["auto", "none"],
+                             Field(description="auto: the pose the item's own file carries, translated to this "
+                                               "figure's bones. Or {bone: [x, y, z]} degrees, e.g. {\"l_foot\": "
+                                               "[26, 0, 0], \"l_toes\": [-35, 0, 0]} and the same for r_.")] = "auto",
+        keep_shape: Annotated[bool, Field(description="Keep the item's designed shape while the feet take the "
+                                                      "pose (a morph on the item).")] = True,
+        weights: Annotated[bool, Field(description="Put back the weights the author painted instead of the ones "
+                                                   "Auto-Fit projected (footwear only).")] = True,
+        ground: Annotated[bool, Field(description="Lift the figure so the soles stand where the bare feet stood. "
+                                                  "false for a seated or lying figure.")] = True,
+        floor_y: Annotated[float | None, Field(description="Floor height for ground, cm.")] = None,
+    ) -> dict:
+        """Checks and repairs footwear that sits wrong on a figure, above all shoes made for another
+        Genesis generation that Auto-Fit converted (foot flat through a heeled shoe, shoe under the
+        floor): measures the soles against the shoe, poses the feet the way the shoe's own file
+        asks, keeps the shoe's shape, and stands the figure on its soles. Reports before and after."""
+        check = await call("wearable_refit", _clean(item=item, figure=figure, action="check"), timeout=180)
+        idx = await index()
+        info = await anyio.to_thread.run_sync(lambda: _refit_source(idx, check, source))
+        w_args = {"weights": info.pop("_weights", None), "vertex_count": info.pop("_vertex_count", None)}
+        pose = None
+        if isinstance(foot_pose, dict):
+            pose = foot_pose
+        elif foot_pose == "auto":
+            pose = info.get("pose") or None
+        if not fix:
+            now = check.get("foot_rotation", {})
+            if pose and any(abs(v - (now.get(b) or [0, 0, 0])[i]) > 2 for b, rot in pose.items()
+                            for i, v in enumerate(rot)):
+                check["problems"].append({"code": "pose_not_applied", "text": (
+                    "The item's file poses the feet (" + ", ".join(f"{b} {r}" for b, r in pose.items()) +
+                    ") but the figure is not in that pose: Daz skipped it because the bones are named "
+                    "differently on this generation.")})
+                check["verdict"] = "misplaced"
+            check["source"] = info
+            if check["verdict"] != "ok":
+                check["hint"] = "Run wearable_refit(item, fix=true), then look at the feet from the side."
+            return check
+        result = await call("wearable_refit", _clean(
+            item=item, figure=figure, action="fix", pose=pose, keep_shape=keep_shape, ground=ground,
+            floor_y=floor_y, **(w_args if weights else {})), timeout=600)
+        result["source"] = info
+        if not pose:
+            result["notes"].append("No foot pose was found for this item, so the feet were left as they are. "
+                                   "Pass foot_pose if the shoe has a heel.")
+        return result
 
     # -------------------------------------------------------- cameras ----
     @mcp.tool(annotations=CHANGES_SCENE)

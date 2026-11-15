@@ -66,7 +66,7 @@ def encode(ffmpeg: str, frames: list[Path], out: Path, fps: float, fmt: str = "m
         raise VideoError("No frames to encode.")
     list_path = out.with_name(out.stem + "-frames.txt")
     _concat_list(frames, fps, list_path)
-    cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0", "-i", str(list_path)]
+    cmd = [ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0", "-i", str(list_path)]
     if fmt == "mp4":
         # yuv420p plays everywhere (Windows, macOS, browsers); it needs even sizes.
         cmd += ["-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2", "-r", f"{fps:g}", "-c:v", "libx264",
@@ -75,7 +75,7 @@ def encode(ffmpeg: str, frames: list[Path], out: Path, fps: float, fmt: str = "m
         cmd += ["-vf", f"fps={fps:g},scale='min({gif_width},iw)':-2:flags=lanczos,split[a][b];"
                        "[a]palettegen[p];[b][p]paletteuse", "-loop", "0", str(out)]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL,
                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise VideoError(f"ffmpeg did not run: {exc}") from exc
