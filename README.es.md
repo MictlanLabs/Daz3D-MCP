@@ -195,6 +195,28 @@ npm install --prefix tests/fake_daz  # una vez, para revisar la sintaxis ES5
 Compilar el puente: ver [bridge/README.md](bridge/README.md).
 El protocolo del puente está en [docs/protocol.md](docs/protocol.md).
 
+### Versiones
+
+La versión del paquete vive solo en `pyproject.toml`; `daz3d_mcp.__version__`
+(la que muestran `daz_status` y `daz3d-mcp --version`) se lee de ahí. Súbela
+con uv, que también actualiza `uv.lock`, y agrega la versión a
+[CHANGELOG.md](CHANGELOG.md) y a [CHANGELOG.es.md](CHANGELOG.es.md):
+
+```bash
+uv version --bump patch   # 0.5.0 -> 0.5.1
+uv version --bump minor   # 0.5.0 -> 0.6.0
+```
+
+Mientras la versión sea 0.x: **patch** para correcciones, **minor** para
+herramientas o skills nuevas y para cambios incompatibles. 1.0.0 es el primer
+lanzamiento público (PyPI y el plugin compilado en GitHub). `setup` descarga el
+plugin del release de GitHub `v<versión>`, así que un tag de release debe
+llevar los archivos del plugin.
+
+El plugin puente tiene su propia versión en `bridge/src/version.h`; súbela solo
+cuando cambie el plugin, y sube `DAZMCP_PROTOCOL_VERSION` (y `PROTOCOL_VERSION`
+en `src/daz3d_mcp/__init__.py`) solo cuando cambie el formato HTTP.
+
 ## Licencia
 
 Apache 2.0. Ver [LICENSE](LICENSE). El SDK de Daz Studio no se incluye.
