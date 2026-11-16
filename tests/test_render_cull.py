@@ -47,7 +47,7 @@ class Scene:
         self.next += 1
         return d
 
-    def camera(self, label, position, rotation=(0, 0, 0), focal=50):
+    def camera(self, label, position, rotation=(0, 0, 0), focal=89):   # 89 mm: Daz spreads the 36 mm frame over the height
         self.nodes.append({"id": self.next, "class": "DzBasicCamera", "label": label, "name": label,
                            "parent": None, "position": list(position), "rotation": list(rotation),
                            "props": {"Focal Length": {"type": "float", "value": focal, "min": 1, "max": 10000}}})

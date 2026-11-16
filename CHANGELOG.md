@@ -12,6 +12,41 @@ noted below when it changes.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-16
+
+### Added
+
+- `wearable_refit` repairs any clothing from another Genesis generation, not
+  only shoes. It reports `rig` (how much of the item hangs from bones the
+  figure has) and `shape` (distance to the skin with and without each clone
+  shape), with the problems `not_converted` and `other_shape`; `fix=true`
+  rebuilds such a piece with Daz's Transfer Utility and the clone of its
+  generation, then converts what was fitted to it (belts, zips, buttons).
+  New `convert` argument.
+- `wearable_refit(item=<figure>)` checks, or with `fix=true` repairs,
+  everything a figure wears.
+- `wearable_refit` reports `below_floor` for a sole under the floor, and
+  `feet.*.heel_minus_toe_cm`.
+- `daz_dialog` reports `more_dialogs` when Daz opens another dialog right after
+  the stopped call finishes (Auto-Fit asks once for each piece of an outfit).
+
+### Fixed
+
+- Items of an outfit whose Auto-Fit dialog was never answered stayed with the
+  other generation's bones and shape (a Genesis 9 overall on Genesis 8 kept
+  its arms down and did not follow the pose). They are now found and rebuilt.
+- Boots with a thick sole and no modeled insole were reported as
+  `foot_floating`; an even gap is now a note.
+- Camera framing assumed the 36 mm frame spans the picture's width; Daz Studio
+  spreads it over the height. `render_cull` dropped things at the sides of a
+  wide picture that were in view (a figure's eyelashes and gloves at the edge
+  of a two shot), `camera_shot` framed 1.8 times wider than asked on 16:9
+  pictures, and `camera_create(frame=...)` left extra room. Close-ups are now
+  as tight as their shot names say, and `extreme_close_up` keeps the mouth in
+  the picture.
+- `wearable_refit` measured feet against an item fitted to another item; it
+  now uses the figure that wears it.
+
 ## [0.5.1] - 2026-11-15
 
 ### Added
@@ -123,7 +158,8 @@ noted below when it changes.
 - First MCP server, bridge plugin, scene tools, `setup`, `install` and `doctor`
   commands.
 
-[Unreleased]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v0.3.0...v0.4.0

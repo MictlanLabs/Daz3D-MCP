@@ -138,7 +138,8 @@ var TEMPLATES = {
 				{ name: "Ana9_Body", label: "Ana 9 Body", group: "/Actor/Characters", value: 0, min: 0, max: 1 },
 				{ name: "Ana9_Head", label: "Ana 9 Head", group: "/Actor/Characters", value: 0, min: 0, max: 1 },
 				{ name: "Leo9_Body", label: "Leo 9 Body", group: "/Actor/Characters", value: 0, min: 0, max: 1 },
-				{ name: "Leo9_Head", label: "Leo 9 Head", group: "/Actor/Characters", value: 0, min: 0, max: 1 }
+				{ name: "Leo9_Head", label: "Leo 9 Head", group: "/Actor/Characters", value: 0, min: 0, max: 1 },
+				{ name: "CloneGenesis8Female", label: "CloneGenesis8Female", group: "/Hidden/Clones", value: 0, min: 0, max: 1, hidden: true }
 			],
 			materials: surfaces.map(function (s) {
 				return { name: s, label: s, shader: "Iray Uber", props: skinProps(s === "Eyes" ? [0.3, 0.4, 0.6] : [0.8, 0.62, 0.52]) };
@@ -533,6 +534,24 @@ Node.prototype.getWSBoundingBox = function () {
 	};
 };
 Node.prototype.getFollowTarget = function () { return wrap(byId(this.d.fitted_to)); };
+// A fitted item's rig: "skin": {bone name: vertices it moves}.
+Node.prototype.getSkinBinding = function () {
+	var skin = this.d.skin;
+	if (!skin) { return null; }
+	var names = Object.keys(skin);
+	return {
+		getNumBoneBindings: function () { return names.length; },
+		getBoneBinding: function (i) {
+			return {
+				getBone: function () { return { getName: function () { return names[i]; } }; },
+				getWeights: function () {
+					return { hasNonZeroWeight: function () { return skin[names[i]] > 0; },
+						getNumAffected: function () { return skin[names[i]]; } };
+				}
+			};
+		}
+	};
+};
 Node.prototype.getSkeleton = function () { return this.className() === "DzBone" ? wrap(byId(this.d.skel || this.d.parent)) : null; };
 Node.prototype.getOrigin = function () { return new Vec(this.d.origin || [0, 0, 0]); };
 Node.prototype.getEndPoint = function () { return new Vec(this.d.end || this.d.origin || [0, 0, 0]); };
@@ -589,7 +608,8 @@ Node.prototype.getObject = function () {
 				getLabel: function () { return m.label; },
 				inherits: function (c) { return c === "DzMorph" || c === "DzModifier"; },
 				className: function () { return "DzMorph"; },
-				getValueControl: function () { return new Prop(m, m.label); }
+				getValueControl: function () { return new Prop(m, m.label); },
+				getValueChannel: function () { return new Prop(m, m.label); }
 			};
 		},
 		forceCacheUpdate: function () { /* the fake builds the mesh on demand */ },
@@ -1079,7 +1099,8 @@ function inFrame(cam, p) {
 	if (z2 >= 0) { return false; }
 	var f = cam.getFocalLength();
 	var aspect = state.render.width / state.render.height;
-	return Math.abs(x1 / -z2) <= 18 / f + 1e-6 && Math.abs(y2 / -z2) <= 18 / (aspect * f) + 1e-6;
+	// like Daz Studio: the 36 mm frame spans the picture's height
+	return Math.abs(x1 / -z2) <= 18 * aspect / f + 1e-6 && Math.abs(y2 / -z2) <= 18 / f + 1e-6;
 }
 
 function renderSummary(cam) {
@@ -1537,6 +1558,10 @@ global.DzTransferUtility = function () {
 	this.setSource = function (n) { if (!(n instanceof Node)) { return false; } cfg.source = n; return true; };
 	this.setTarget = function (n) { if (!(n instanceof Node)) { return false; } cfg.target = n; return true; };
 	this.setSourceBaseCurrent = function () { cfg.sourceBase = "current"; return true; };
+	this.setSourceBaseMorph = function (m) { cfg.sourceBase = m ? String(m.getName()) : "base"; return !!m; };
+	this.setAdjustTargetBase = function (b) { cfg.adjustBase = b; };
+	this.setSmartLeftRightHandling = function (b) { cfg.leftRight = b; };
+	this.setLockViewOnTransfer = function (b) { cfg.lockView = b; };
 	this.setTargetBaseCurrent = function () { return true; };
 	this.setSilentImporters = function (b) { cfg.silent = b; };
 	this.setTransferBinding = function (b) { cfg.binding = b; };
@@ -1553,7 +1578,7 @@ global.DzTransferUtility = function () {
 	this.doTransfer = function () {
 		var src = cfg.source, tgt = cfg.target;
 		if (!src || !tgt || !src.inherits("DzFigure") || !cfg.binding) { return false; }
-		if (!tgt.d.geometry) { return false; }
+		if (!tgt.d.geometry && !tgt.d.mesh_boxes) { return false; }
 		var box = tgt.getWSBoundingBox();
 		var sp = src.getWSPos(), ss = src.getWSScale();
 		var d = {
@@ -1563,8 +1588,12 @@ global.DzTransferUtility = function () {
 			position: [0, 0, 0], rotation: [0, 0, 0],
 			materials: tgt.d.materials || [],
 			content_type: cfg.useContentType ? cfg.contentType : "Follower",
-			transfer: { morphs: cfg.morphs, base: cfg.sourceBase, smooth: cfg.smooth }
+			transfer: { morphs: cfg.morphs, base: cfg.sourceBase, smooth: cfg.smooth, adjust_base: !!cfg.adjustBase }
 		};
+		if (tgt.d.mesh_boxes) { d.mesh_boxes = tgt.d.mesh_boxes; }
+		// the projected rig: every bone of the source figure
+		d.skin = {};
+		src.boneNodes().forEach(function (b) { d.skin[b.d.name] = 10; });
 		if (cfg.fit) { d.fitted_to = src.d.id; }
 		if (cfg.parent || cfg.fit) { d.parent = src.d.id; }
 		if (cfg.morphs) {
@@ -1587,7 +1616,8 @@ global.DzTransferUtility = function () {
 		});
 		cfg.output = out;
 		state.transfers = (state.transfers || []).concat([{ source: src.d.label, target: d.label,
-			content_type: d.content_type, morphs: cfg.morphs, smooth: cfg.smooth, base: cfg.sourceBase }]);
+			content_type: d.content_type, morphs: cfg.morphs, smooth: cfg.smooth, base: cfg.sourceBase,
+			adjust_base: !!cfg.adjustBase }]);
 		return true;
 	};
 	this.getTargetOutputFigure = function () { return cfg.output || null; };

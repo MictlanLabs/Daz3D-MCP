@@ -456,9 +456,79 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient],
             info["other_generation"] = info["made_for"] != style
         return info
 
+    async def _refit_one(item: str, fix: bool, figure: str | None, source: str | None,
+                         foot_pose: dict[str, list[float]] | str, keep_shape: bool, weights: bool,
+                         ground: bool, floor_y: float | None, convert: bool) -> dict:
+        check = await call("wearable_refit", _clean(item=item, figure=figure, action="check", floor_y=floor_y),
+                           timeout=300)
+        idx = await index()
+        info = await anyio.to_thread.run_sync(lambda: _refit_source(idx, check, source))
+        codes = {p["code"] for p in check.get("problems", [])}
+        converted: list[dict] = []
+        if fix and convert and codes & {"not_converted", "other_shape"}:
+            # rebuild the item for this figure, then whatever was fitted to it
+            queue = [item]
+            seen: set[str] = set()
+            while queue and len(seen) < 20:
+                label = queue.pop(0)
+                if label in seen:
+                    continue
+                seen.add(label)
+                conv = await call("wearable_refit", _clean(
+                    item=label, action="convert",
+                    clone=refit.clone_for(info.get("file")) if label == item else None), timeout=900)
+                if conv.get("converted") or conv.get("why"):
+                    converted.append({k: conv.get(k) for k in ("item", "converted", "clone", "why") if conv.get(k)})
+                queue += conv.get("fitted_items") or []
+            check = await call("wearable_refit", _clean(item=item, figure=figure, action="check", floor_y=floor_y),
+                               timeout=300)
+            info = await anyio.to_thread.run_sync(lambda: _refit_source(idx, check, source))
+        w_args = {"weights": info.pop("_weights", None), "vertex_count": info.pop("_vertex_count", None)}
+        pose = None
+        if isinstance(foot_pose, dict):
+            pose = foot_pose
+        elif foot_pose == "auto" and check.get("footwear"):
+            pose = info.get("pose") or None
+        if not fix:
+            now = check.get("foot_rotation", {})
+            if pose and any(abs(v - (now.get(b) or [0, 0, 0])[i]) > 2 for b, rot in pose.items()
+                            for i, v in enumerate(rot)):
+                check["problems"].append({"code": "pose_not_applied", "text": (
+                    "The item's file poses the feet (" + ", ".join(f"{b} {r}" for b, r in pose.items()) +
+                    ") but the figure is not in that pose: Daz skipped it because the bones are named "
+                    "differently on this generation.")})
+                check["verdict"] = "misplaced"
+            check["source"] = info
+            if check["verdict"] != "ok":
+                check["hint"] = ("Run wearable_refit(item, fix=true), then look at it from the side." if
+                                 not codes & {"not_converted", "other_shape"} else
+                                 "Run wearable_refit(item, fix=true): it rebuilds the item for this figure "
+                                 "(Daz's Transfer Utility with the clone of the item's generation).")
+            return check
+        if not check.get("footwear") and not isinstance(foot_pose, dict):
+            # clothing other than shoes: conversion was the repair
+            result = {"item": check["item"], "figure": check["figure"], "converted": converted,
+                      "after": check, "verdict": check["verdict"], "source": info, "notes": []}
+            if not converted:
+                result["notes"].append("Nothing to rebuild: the item already follows this figure's bones and shape. "
+                                       "For skin poking through, wearable_adjust (smoothing, collision).")
+            return result
+        result = await call("wearable_refit", _clean(
+            item=item, figure=figure, action="fix", pose=pose, keep_shape=keep_shape, ground=ground,
+            floor_y=floor_y, **(w_args if weights else {})), timeout=600)
+        result["source"] = info
+        if converted:
+            result["converted"] = converted
+            result["done"] = ["convert"] + result.get("done", [])
+        if not pose and check.get("footwear"):
+            result["notes"].append("No foot pose was found for this item, so the feet were left as they are. "
+                                   "Pass foot_pose if the shoe has a heel.")
+        return result
+
     @mcp.tool(annotations=CHANGES_SCENE)
     async def wearable_refit(
-        item: Annotated[str, Field(description="Label of the shoes, boots or other worn item.")],
+        item: Annotated[str, Field(description="Label of the worn item (shoes, boots, top, pants...), or of a "
+                                               "figure to check everything it wears.")],
         fix: Annotated[bool, Field(description="false only measures and reports; true repairs.")] = False,
         figure: Annotated[str | None, Field(description="Default: the figure the item is fitted to.")] = None,
         source: Annotated[str | None, Field(description="The .duf the item was loaded from, when it is not found "
@@ -474,41 +544,42 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient],
         ground: Annotated[bool, Field(description="Lift the figure so the soles stand where the bare feet stood. "
                                                   "false for a seated or lying figure.")] = True,
         floor_y: Annotated[float | None, Field(description="Floor height for ground, cm.")] = None,
+        convert: Annotated[bool, Field(description="With fix: rebuild an item that still has the bones or the "
+                                                   "shape of the generation it was made for (Daz's Transfer "
+                                                   "Utility, as Auto-Fit does when told the item's "
+                                                   "generation).")] = True,
     ) -> dict:
-        """Checks and repairs footwear that sits wrong on a figure, above all shoes made for another
-        Genesis generation that Auto-Fit converted (foot flat through a heeled shoe, shoe under the
-        floor): measures the soles against the shoe, poses the feet the way the shoe's own file
-        asks, keeps the shoe's shape, and stands the figure on its soles. Reports before and after."""
-        check = await call("wearable_refit", _clean(item=item, figure=figure, action="check"), timeout=180)
-        idx = await index()
-        info = await anyio.to_thread.run_sync(lambda: _refit_source(idx, check, source))
-        w_args = {"weights": info.pop("_weights", None), "vertex_count": info.pop("_vertex_count", None)}
-        pose = None
-        if isinstance(foot_pose, dict):
-            pose = foot_pose
-        elif foot_pose == "auto":
-            pose = info.get("pose") or None
-        if not fix:
-            now = check.get("foot_rotation", {})
-            if pose and any(abs(v - (now.get(b) or [0, 0, 0])[i]) > 2 for b, rot in pose.items()
-                            for i, v in enumerate(rot)):
-                check["problems"].append({"code": "pose_not_applied", "text": (
-                    "The item's file poses the feet (" + ", ".join(f"{b} {r}" for b, r in pose.items()) +
-                    ") but the figure is not in that pose: Daz skipped it because the bones are named "
-                    "differently on this generation.")})
-                check["verdict"] = "misplaced"
-            check["source"] = info
-            if check["verdict"] != "ok":
-                check["hint"] = "Run wearable_refit(item, fix=true), then look at the feet from the side."
-            return check
-        result = await call("wearable_refit", _clean(
-            item=item, figure=figure, action="fix", pose=pose, keep_shape=keep_shape, ground=ground,
-            floor_y=floor_y, **(w_args if weights else {})), timeout=600)
-        result["source"] = info
-        if not pose:
-            result["notes"].append("No foot pose was found for this item, so the feet were left as they are. "
-                                   "Pass foot_pose if the shoe has a heel.")
-        return result
+        """Checks and repairs clothing and shoes made for another Genesis generation that Auto-Fit
+        left wrong. Any item: one still rigged with the other generation's bones (it keeps that
+        body's shape and does not follow the pose) or still in that body's shape is rebuilt for
+        this figure. Footwear also: measures the soles against the shoe, poses the feet the way
+        the shoe's own file asks, keeps the shoe's shape, and stands the figure on its soles.
+        Given a figure, it does this for everything the figure wears. Reports before and after."""
+        worn = await call("wearable_refit", {"item": item, "action": "worn"})
+        if not worn.get("figure"):
+            return await _refit_one(item, fix, figure, source, foot_pose, keep_shape, weights, ground, floor_y,
+                                    convert)
+        results = []
+        footwear_done = False
+        for label in worn["items"]:
+            try:
+                res = await _refit_one(label, False, None, None, "auto", keep_shape, weights, ground, floor_y,
+                                       convert)
+                if fix and res.get("verdict") != "ok":
+                    # the figure is grounded once, on the first pair of shoes
+                    res = await _refit_one(label, True, None, None, foot_pose, keep_shape, weights,
+                                           ground and not footwear_done, floor_y, convert)
+                    footwear_done = footwear_done or bool((res.get("after") or {}).get("footwear"))
+            except ToolError as e:
+                res = {"item": label, "error": str(e)}
+            results.append({"item": label, "verdict": res.get("verdict"), "converted": res.get("converted"),
+                            "done": res.get("done"),
+                            "problems": [p["code"] for p in (res.get("after") or res).get("problems", [])],
+                            **({"error": res["error"]} if "error" in res else {})})
+        return {"figure": worn["figure"], "items": results,
+                "verdict": "ok" if all(r.get("verdict") == "ok" for r in results) else "misplaced",
+                **({} if fix else {"hint": "Run wearable_refit(figure, fix=true) to repair the items that are "
+                                           "not ok."})}
 
     # -------------------------------------------------------- cameras ----
     @mcp.tool(annotations=CHANGES_SCENE)

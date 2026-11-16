@@ -101,6 +101,11 @@ and the eyes; what stays is the set, the light and where the people are.
   turned. Reset a face with `neutral` when a beat needs a clean start.
 - `eyes_look_at` reports eyes that hit their limit (about 30 degrees);
   `render_shots` lists them in `warnings`. Give that gaze `head` 0.3 to 0.6.
+- Each beat changes faces and the camera, so Iray prepares the scene again
+  before every image: count about a minute per beat on top of `max_time`
+  with heavy hair in the set (9 beats at 1920x1080 and `max_time` 60 took
+  about 16 minutes on an RTX 5060, some 105 s a beat). `cull=true` keeps a crowded set inside the
+  card's memory (see `render-culling`).
 - Tested on Daz Studio 6.26 with a seated Genesis 9 and a standing Genesis
   8.1 Male about 90 cm apart: close-up, reverse close-up, both over the
   shoulder shots and a two shot cut on the same side of the line.

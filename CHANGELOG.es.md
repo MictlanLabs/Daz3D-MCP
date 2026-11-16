@@ -13,6 +13,43 @@ que se anota abajo cuando cambia.
 
 ## [Sin publicar]
 
+## [0.6.0] - 2026-11-16
+
+### Agregado
+
+- `wearable_refit` repara cualquier prenda de otra generación de Genesis, no
+  solo zapatos. Informa `rig` (cuánto de la prenda cuelga de huesos que la
+  figura tiene) y `shape` (distancia a la piel con y sin cada forma clon), con
+  los problemas `not_converted` y `other_shape`; `fix=true` reconstruye esa
+  prenda con la Transfer Utility de Daz y el clon de su generación, y luego
+  convierte lo que estaba ajustado a ella (cinturones, cierres, botones).
+  Nuevo argumento `convert`.
+- `wearable_refit(item=<figura>)` revisa, o con `fix=true` repara, todo lo que
+  viste una figura.
+- `wearable_refit` informa `below_floor` cuando una suela queda bajo el piso,
+  y `feet.*.heel_minus_toe_cm`.
+- `daz_dialog` informa `more_dialogs` cuando Daz abre otro diálogo justo
+  después de terminar la llamada detenida (el Auto-Fit pregunta una vez por
+  cada prenda de un conjunto).
+
+### Corregido
+
+- Las prendas de un conjunto cuyo diálogo de Auto-Fit nadie respondía se
+  quedaban con los huesos y la forma de la otra generación (un overol de
+  Genesis 9 en Genesis 8 dejaba los brazos abajo y no seguía la pose). Ahora
+  se detectan y se reconstruyen.
+- Las botas de suela gruesa sin plantilla modelada salían como
+  `foot_floating`; un hueco parejo ahora es una nota.
+- El encuadre de las cámaras suponía que el cuadro de 36 mm cubre el ancho de
+  la imagen; Daz Studio lo reparte en el alto. `render_cull` quitaba cosas a
+  los lados de una imagen ancha que sí se veían (las pestañas y los guantes
+  de una figura en el borde de un plano de dos), `camera_shot` encuadraba 1.8
+  veces más abierto de lo pedido en imágenes 16:9 y `camera_create(frame=...)`
+  dejaba espacio de más. Los primeros planos ahora son tan cerrados como dice
+  su nombre, y `extreme_close_up` deja la boca dentro de la imagen.
+- `wearable_refit` medía los pies contra una prenda ajustada a otra prenda;
+  ahora usa la figura que la viste.
+
 ## [0.5.1] - 2026-11-15
 
 ### Agregado
@@ -135,7 +172,8 @@ que se anota abajo cuando cambia.
 - Primer servidor MCP, plugin puente, herramientas de escena y los comandos
   `setup`, `install` y `doctor`.
 
-[Sin publicar]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v0.5.1...HEAD
+[Sin publicar]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v0.3.0...v0.4.0

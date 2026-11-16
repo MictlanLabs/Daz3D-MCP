@@ -91,9 +91,26 @@ function soleReport(fig, item) {
 		key = Math.floor(pts.x[i] / 1.5) + "," + Math.floor(pts.z[i] / 1.5);
 		if (!c[key] || pts.y[i] < c[key][1]) { c[key] = [pts.x[i], pts.y[i], pts.z[i]]; }
 	}
+	var ankle, ax, az, far, len, t, heel, toe, dir;
 	for (side in cells) {
 		if (!cells.hasOwnProperty(side)) { continue; }
-		n = 0; through = 0; floating = 0; on = 0; covered = 0; gaps = [];
+		n = 0; through = 0; floating = 0; on = 0; covered = 0; gaps = []; heel = []; toe = [];
+		// the foot's length runs from the ankle to the farthest sole point:
+		// heel and toes are its back and front thirds
+		ankle = DazMcp.findBone(fig, side === "left_foot" ? "lFoot" : "rFoot") ||
+			DazMcp.findBone(fig, side === "left_foot" ? "l_foot" : "r_foot");
+		ankle = ankle ? ankle.getWSPos() : null;
+		dir = null;
+		if (ankle) {
+			far = 0;
+			for (key in cells[side]) {
+				if (!cells[side].hasOwnProperty(key)) { continue; }
+				p = cells[side][key];
+				len = (p[0] - ankle.x) * (p[0] - ankle.x) + (p[2] - ankle.z) * (p[2] - ankle.z);
+				if (len > far) { far = len; ax = p[0] - ankle.x; az = p[2] - ankle.z; }
+			}
+			if (far > 1) { len = Math.sqrt(far); dir = [ax / len, az / len, len]; }
+		}
 		for (key in cells[side]) {
 			if (!cells[side].hasOwnProperty(key)) { continue; }
 			p = cells[side][key];
@@ -112,6 +129,10 @@ function soleReport(fig, item) {
 			if (below === null) { continue; }
 			gaps.push(p[1] - below);
 			if (p[1] - below > 1.5) { floating++; } else { on++; }
+			if (dir) {
+				t = ((p[0] - ankle.x) * dir[0] + (p[2] - ankle.z) * dir[1]) / dir[2];
+				if (t < 0.33) { heel.push(p[1] - below); } else if (t > 0.66) { toe.push(p[1] - below); }
+			}
 		}
 		out[side.replace("_foot", "")] = {
 			sole_points: n,
@@ -120,7 +141,10 @@ function soleReport(fig, item) {
 			floating: covered ? r(floating / covered, 2) : 0,
 			resting: covered ? r(on / covered, 2) : 0,
 			median_gap_cm: gaps.length ? r(median(gaps), 1) : null,
-			max_gap_cm: gaps.length ? r(Math.max.apply(null, gaps), 1) : null
+			max_gap_cm: gaps.length ? r(Math.max.apply(null, gaps), 1) : null,
+			// heel gap minus toe gap: a foot left flat in a heeled shoe, or
+			// on tiptoe in a flat one, rests at one end only
+			heel_minus_toe_cm: heel.length && toe.length ? r(median(heel) - median(toe), 1) : null
 		};
 	}
 	return out;
@@ -133,11 +157,11 @@ function footLowest(fig) {
 	return y;
 }
 
-function report(fig, item) {
+function report(fig, item, floorY) {
 	var share = footShare(item);
 	var style = DazMcp.findBone(fig, "l_foot") ? "genesis9" : (DazMcp.findBone(fig, "lFoot") ? "genesis8" : null);
 	var footName = style === "genesis8" ? ["lFoot", "rFoot", "lToe", "rToe"] : ["l_foot", "r_foot", "l_toes", "r_toes"];
-	var rot = {}, i, b, feet, side, problems = [], f, verts, r = DazMcp.round;
+	var rot = {}, i, b, feet, side, problems = [], notes = [], f, verts, r = DazMcp.round, rig, shape, low, floor;
 	var looksFootwear = /shoe|boot|sandal|heel|sneaker|slipper|pump|loafer|footwear|flat|clog|mule|zapat|bota/i
 		.test(item.getLabel() + " " + item.getName());
 	var isFootwear = share ? share.share > 0.5 : looksFootwear;
@@ -149,7 +173,7 @@ function report(fig, item) {
 		}
 	}
 	verts = itemVerts(item);
-	feet = soleReport(fig, item);
+	feet = isFootwear ? soleReport(fig, item) : null;
 	if (isFootwear) {
 		for (side in feet) {
 			if (!feet.hasOwnProperty(side)) { continue; }
@@ -160,16 +184,43 @@ function report(fig, item) {
 			} else if (f.through_sole > 0.1) {
 				problems.push({ code: "foot_through_sole", foot: side, text: Math.round(f.through_sole * 100) +
 					" % of the " + side + " sole is below the item's sole: the foot goes through it." });
-			} else if (f.floating > 0.4) {
+			} else if (f.floating > 0.4 && (f.heel_minus_toe_cm === null || Math.abs(f.heel_minus_toe_cm) > 1.5)) {
 				problems.push({ code: "foot_floating", foot: side, text: Math.round(f.floating * 100) +
 					" % of the " + side + " sole floats more than 1.5 cm above the item (median " + f.median_gap_cm +
-					" cm): the foot is not in the pose the item was made for." });
+					" cm, heel minus toe " + f.heel_minus_toe_cm + " cm): the foot is not in the pose the item was " +
+					"made for." });
+			} else if (f.floating > 0.4 && f.median_gap_cm > 4) {
+				problems.push({ code: "foot_floating", foot: side, text: "The " + side + " sole is " + f.median_gap_cm +
+					" cm above the item all along: the item hangs below the foot." });
+			} else if (f.floating > 0.4) {
+				notes.push("The " + side + " sole is an even " + f.median_gap_cm + " cm above the item's underside: " +
+					"a thick sole with no insole modeled, not a fault.");
 			}
 		}
+	}
+	low = { item: verts.length ? lowestY(verts) : null, bare: footLowest(fig) };
+	floor = (floorY !== undefined && floorY !== null) ? floorY : Math.min(low.bare, 0);
+	if (isFootwear && low.item !== null && low.item < floor - 0.5) {
+		problems.push({ code: "below_floor", text: "The item's sole is " + r(floor - low.item, 1) + " cm below the " +
+			"floor (" + r(floor, 1) + " cm): the figure has to stand higher on it (fix grounds it)." });
+	}
+	rig = rigReport(item);
+	shape = shapeReport(rootFigure(item), item);
+	if (shape && shape.other_shape && !(rig && !rig.converted)) {
+		problems.unshift({ code: "other_shape", text: "The item lies " + shape.own_shape_cm + " cm (median) from the " +
+			"skin but " + shape.best_clone_cm + " cm with " + shape.best_clone + " dialed in: it kept the shape of " +
+			"the generation it was made for (Auto-Fit was not told which), so it floats or sinks in places." });
+	}
+	if (rig && !rig.converted) {
+		problems.unshift({ code: "not_converted", text: "Only " + Math.round(rig.matched_share * 100) + " % of the item " +
+			"hangs from bones " + rig.follows + " has (" + rig.unmatched.join(", ") + " are another generation's): it " +
+			"keeps the shape of the figure it was made for and does not follow the pose." });
 	}
 	return {
 		item: item.getLabel(),
 		item_name: String(item.getName()),
+		rig: rig,
+		shape: shape,
 		figure: fig.getLabel(),
 		generation: DazMcp.generation(fig),
 		bone_style: style,
@@ -178,9 +229,10 @@ function report(fig, item) {
 		vertices: verts.length / 3,
 		feet: feet,
 		foot_rotation: rot,
-		lowest_cm: { item: verts.length ? r(lowestY(verts), 1) : null, bare_feet: r(footLowest(fig), 1) },
+		lowest_cm: { item: low.item !== null ? r(low.item, 1) : null, bare_feet: r(low.bare, 1) },
 		shape_keep: !!findKeep(item),
 		problems: problems,
+		notes: notes,
 		verdict: problems.length ? "misplaced" : "ok"
 	};
 }
@@ -356,7 +408,325 @@ function keepShape(fig, item, pose) {
 	return result;
 }
 
+// ------------------------------------------------- generation convert ----
+// An item made for another generation whose rig was never converted keeps
+// its own bones (l_upperarm on a Genesis 8 figure, lShldrBend on Genesis 9):
+// Daz only makes a fitted item's bones follow the figure's bones of the same
+// name, so most of it stays in the shape and pose of the generation it was
+// made for. Daz's Transfer Utility (what Auto-Fit runs when it is told the
+// item's generation) rebuilds it: the figure takes the shape of that
+// generation (its clone morph) so the item lies on it, the figure's rigging
+// is projected onto the item, and the item's base shape is moved to the
+// figure's own shape.
+
+// The figure an item is worn by, through items fitted to other items.
+function rootFigure(node) {
+	var n = node, guard = 0, t;
+	while (n && guard < 20) {
+		t = null;
+		try { t = n.getFollowTarget(); } catch (e) { t = null; }
+		if (!t) { return n; }
+		n = t;
+		guard++;
+	}
+	return n;
+}
+
+var G9_CENTER = /^(spine[1-4]|neck[12]|head|hip|pelvis)$/;
+var G8_CENTER = /^(abdomen(Lower|Upper)|chest(Lower|Upper)|neck(Lower|Upper)|head|hip|pelvis)$/;
+
+// A bone of a Genesis skeleton (as opposed to one the item adds, such as a
+// tool belt's "Tools"), and of which generation.
+function genesisBone(name) {
+	if (/^[lr]_[a-z]/.test(name) || /^(spine[1-4]|neck[12])$/.test(name)) { return "genesis9"; }
+	if (/^[lr][A-Z]/.test(name) || /^(abdomen(Lower|Upper)|chest(Lower|Upper)|neck(Lower|Upper))$/.test(name)) {
+		return "genesis8";
+	}
+	if (G9_CENTER.test(name) || G8_CENTER.test(name)) { return "both"; }
+	return null;
+}
+
+function boneStyleOf(names) {
+	var i, g9 = 0, g8 = 0, s;
+	for (i = 0; i < names.length; i++) {
+		s = genesisBone(names[i]);
+		if (s === "genesis9") { g9++; } else if (s === "genesis8") { g8++; }
+	}
+	if (!g9 && !g8) { return null; }
+	return g9 > g8 ? "genesis9" : "genesis8";
+}
+
+// How much of the item (by weighted vertices) hangs from bones the figure
+// it follows also has: under half means its rig is another generation's.
+function rigReport(item) {
+	var target = null, sb = null, i, bb, wm, n, name, all = 0, ok = 0, names = [], missing = {}, miss = [];
+	try { target = item.getFollowTarget(); } catch (e) { target = null; }
+	try { sb = item.getSkinBinding(); } catch (e2) { sb = null; }
+	if (!target || !sb) { return null; }
+	for (i = 0; i < sb.getNumBoneBindings(); i++) {
+		bb = sb.getBoneBinding(i);
+		wm = bb.getWeights();
+		if (!wm || !wm.hasNonZeroWeight()) { continue; }
+		n = wm.getNumAffected ? wm.getNumAffected() : 1;
+		if (!n) { n = 1; }
+		name = String(bb.getBone().getName());
+		names.push(name);
+		if (target.findBone && target.findBone(name)) {
+			ok += n;
+			all += n;
+		} else if (genesisBone(name)) {
+			// bones the item adds itself (a tool belt's "Tools") do not count
+			missing[name] = n;
+			all += n;
+		}
+	}
+	for (name in missing) { if (missing.hasOwnProperty(name)) { miss.push([name, missing[name]]); } }
+	miss.sort(function (a, b) { return b[1] - a[1]; });
+	return {
+		item_bones: boneStyleOf(names),
+		follows: target.getLabel(),
+		matched_share: all ? DazMcp.round(ok / all, 2) : 1,
+		unmatched: miss.slice(0, 6).map(function (m) { return m[0]; }),
+		converted: all ? ok / all >= 0.5 : true
+	};
+}
+
+function findModifier(node, name) {
+	var o = node.getObject(), i, m;
+	if (!o) { return null; }
+	for (i = 0; i < o.getNumModifiers(); i++) {
+		m = o.getModifier(i);
+		if (String(m.getName()) === name) { return m; }
+	}
+	return null;
+}
+
+// The clone morph that gives the figure the shape of the item's generation.
+function pickClone(fig, itemStyle, hint) {
+	var names = [], i, m;
+	if (hint) { names.push(hint); }
+	if (itemStyle === "genesis9") { names.push("CloneGenesis9"); }
+	if (itemStyle === "genesis8") {
+		if (/male/i.test(hint || "") && !/female/i.test(hint || "")) {
+			names.push("CloneGenesis8Male", "CloneGenesis8Female");
+		} else {
+			names.push("CloneGenesis8Female", "CloneGenesis8Male");
+		}
+	}
+	for (i = 0; i < names.length; i++) {
+		m = findModifier(fig, names[i]);
+		if (m) { return m; }
+	}
+	return null;
+}
+
+function restPose(fig) {
+	var bones = DazMcp.bones(fig), saved = [], i;
+	for (i = 0; i < bones.length; i++) {
+		saved.push({ bone: bones[i], rot: getRot(bones[i]) });
+		setRot(bones[i], [0, 0, 0]);
+	}
+	return saved;
+}
+
+function putPose(saved) {
+	var i;
+	for (i = 0; i < saved.length; i++) { setRot(saved[i].bone, saved[i].rot); }
+}
+
+// Median distance (cm) from the item to the figure's skin, sampled.
+function skinDistance(fig, sample) {
+	var A = itemVerts(fig), S = 3, grid = {}, j, key, i, x, y, z, cx, cy, cz, r, dx, dy, dz, list, k, d2, best, ds = [];
+	for (j = 0; j < A.length / 3; j++) {
+		key = Math.floor(A[j * 3] / S) + "," + Math.floor(A[j * 3 + 1] / S) + "," + Math.floor(A[j * 3 + 2] / S);
+		(grid[key] || (grid[key] = [])).push(j);
+	}
+	for (i = 0; i < sample.length; i += 3) {
+		x = sample[i]; y = sample[i + 1]; z = sample[i + 2];
+		cx = Math.floor(x / S); cy = Math.floor(y / S); cz = Math.floor(z / S);
+		best = 1e30;
+		for (r = 1; r <= 5 && best > (r - 1) * S * (r - 1) * S; r++) {
+			for (dx = -r; dx <= r; dx++) {
+				for (dy = -r; dy <= r; dy++) {
+					for (dz = -r; dz <= r; dz++) {
+						if (Math.max(Math.abs(dx), Math.abs(dy), Math.abs(dz)) < r) { continue; }
+						list = grid[(cx + dx) + "," + (cy + dy) + "," + (cz + dz)];
+						if (!list) { continue; }
+						for (k = 0; k < list.length; k++) {
+							j = list[k];
+							d2 = (A[j * 3] - x) * (A[j * 3] - x) + (A[j * 3 + 1] - y) * (A[j * 3 + 1] - y) +
+								(A[j * 3 + 2] - z) * (A[j * 3 + 2] - z);
+							if (d2 < best) { best = d2; }
+						}
+					}
+				}
+			}
+		}
+		ds.push(Math.min(Math.sqrt(best), 15));
+	}
+	return median(ds);
+}
+
+// Which shape the item was made around: the figure's own, or one of its
+// clones (another generation). An item Auto-Fit rigged without being told
+// its generation keeps that generation's shape: it lies on the figure only
+// with that clone dialed in.
+function shapeReport(fig, item) {
+	var o = fig.getObject(), clones = [], i, m, saved, P, sample = [], step, base, d, best = null, out = {}, was;
+	if (!o) { return null; }
+	for (i = 0; i < o.getNumModifiers(); i++) {
+		m = o.getModifier(i);
+		if (/^Clone/.test(String(m.getName())) && m.getValueChannel) { clones.push(m); }
+	}
+	if (!clones.length) { return null; }
+	saved = restPose(fig);
+	P = itemVerts(item);
+	step = Math.max(1, Math.ceil(P.length / 3 / 2500));
+	for (i = 0; i < P.length / 3; i += step) { sample.push(P[i * 3], P[i * 3 + 1], P[i * 3 + 2]); }
+	base = skinDistance(fig, sample);
+	for (i = 0; i < clones.length; i++) {
+		was = clones[i].getValueChannel().getValue();
+		clones[i].getValueChannel().setValue(1);
+		// the item may follow the clone too (then it fits either way)
+		d = skinDistance(fig, sample.length ? (function () {
+			var Q = itemVerts(item), s = [], k;
+			for (k = 0; k < Q.length / 3; k += step) { s.push(Q[k * 3], Q[k * 3 + 1], Q[k * 3 + 2]); }
+			return s;
+		}()) : sample);
+		clones[i].getValueChannel().setValue(was);
+		out[String(clones[i].getName())] = DazMcp.round(d, 2);
+		if (best === null || d < best.d) { best = { name: String(clones[i].getName()), d: d }; }
+	}
+	putPose(saved);
+	return {
+		own_shape_cm: DazMcp.round(base, 2),
+		best_clone: best.name,
+		best_clone_cm: DazMcp.round(best.d, 2),
+		clones_cm: out,
+		other_shape: best.d < base * 0.6 && base - best.d > 0.4
+	};
+}
+
+function convertItem(fig, item, hint) {
+	var rig = rigReport(item), clone, bones, saved = [], i, b, kids = [], all, k, n, t, tu, ok, outFig, label, res;
+	var cloneWas, shape = null;
+	if (!rig) { return { converted: false, why: "The item is not fitted or has no rig." }; }
+	clone = hint ? findModifier(fig, hint) : null;
+	if (!clone) {
+		shape = shapeReport(fig, item);
+		if (shape && shape.other_shape) { clone = findModifier(fig, shape.best_clone); }
+	}
+	if (!clone) { clone = pickClone(fig, rig.item_bones, null); }
+	if (!clone) {
+		return { converted: false, why: fig.getLabel() + " has no clone shape for " + (rig.item_bones || "the item's") +
+			" generation, so the item cannot be converted." };
+	}
+	label = item.getLabel();
+	// the rigging is projected at rest: everything unposed while it runs
+	bones = DazMcp.bones(fig);
+	for (i = 0; i < bones.length; i++) {
+		b = bones[i];
+		saved.push({ bone: b, rot: getRot(b) });
+		setRot(b, [0, 0, 0]);
+	}
+	cloneWas = clone.getValueChannel().getValue();
+	clone.getValueChannel().setValue(0);
+	// what hangs from the item (a belt fitted to it, zips and buttons) is
+	// moved to the figure while the item is rebuilt, and back after
+	all = Scene.getNodeList();
+	for (k = 0; k < all.length; k++) {
+		n = all[k];
+		t = null;
+		try { t = n.getFollowTarget ? n.getFollowTarget() : null; } catch (e1) { t = null; }
+		if (t && DazMcp.same(t, item)) {
+			kids.push({ node: n, fitted: true });
+			n.setFollowTarget(null);
+		} else if (n.getNodeParent() && DazMcp.same(n.getNodeParent(), item) && DazMcp.nodeType(n) !== "bone") {
+			kids.push({ node: n, fitted: false });
+			fig.addNodeChild(n, true);
+		}
+	}
+	tu = new DzTransferUtility();
+	tu.setSource(fig);
+	tu.setSourceBaseMorph(clone);
+	tu.setTarget(item);
+	tu.setTransferBinding(true);
+	tu.setAdjustTargetBase(true);
+	tu.setTransferMorphs(false);
+	tu.setFitToFigure(true);
+	tu.setParentToFigure(true);
+	tu.setAddSmoothModifier(true);
+	tu.setRemoveOriginalTarget(true);
+	tu.setSmartLeftRightHandling(true);
+	try { tu.setSilentImporters(true); } catch (e2) { /* older API */ }
+	try { tu.setLockViewOnTransfer(true); } catch (e3) { /* older API */ }
+	ok = tu.doTransfer();
+	outFig = ok ? tu.getTargetOutputFigure() : null;
+	if (outFig) {
+		// the transfer leaves the new bones unbound: fitting again makes
+		// each one follow the figure's bone of the same name
+		outFig.setFollowTarget(null);
+		outFig.setFollowTarget(fig);
+		try { outFig.setLabel(label); } catch (e4) { /* keep Daz's */ }
+	}
+	for (k = 0; k < kids.length; k++) {
+		n = kids[k].node;
+		if (!outFig) {
+			if (kids[k].fitted) { n.setFollowTarget(item); } else { item.addNodeChild(n, true); }
+		} else if (kids[k].fitted) {
+			n.setFollowTarget(outFig);
+		} else {
+			outFig.addNodeChild(n, true);
+		}
+	}
+	clone.getValueChannel().setValue(cloneWas);
+	for (i = 0; i < saved.length; i++) { setRot(saved[i].bone, saved[i].rot); }
+	if (!outFig) { return { converted: false, why: "Daz's Transfer Utility did not convert the item." }; }
+	res = { converted: true, clone: String(clone.getName()), item: outFig.getLabel(), before: rig, after: rigReport(outFig),
+		shape_before: shape, shape_after: shapeReport(fig, outFig) };
+	res.fitted_items = [];
+	for (k = 0; k < kids.length; k++) { if (kids[k].fitted) { res.fitted_items.push(kids[k].node.getLabel()); } }
+	return { node: outFig, report: res };
+}
+
+// What a figure wears (clothing, shoes, and items fitted to those), hair and
+// the figure's own eyelashes, eyes and brows left out.
+function wornItems(fig) {
+	var all = Scene.getNodeList(), out = [], k, n, t, label;
+	for (k = 0; k < all.length; k++) {
+		n = all[k];
+		if (DazMcp.nodeType(n) !== "fitted_figure" || DazMcp.same(n, fig)) { continue; }
+		t = rootFigure(n);
+		if (!DazMcp.same(t, fig)) { continue; }
+		label = String(n.getLabel()) + " " + String(n.getName());
+		if (/eyelash|eyebrow|brow|tear|eyes|mouth|hair|beard|genital|geograft/i.test(label)) { continue; }
+		out.push(n.getLabel());
+	}
+	return out;
+}
+
 function dazmcpTool(args) {
+	if (args.action === "worn") {
+		var wnode = DazMcp.requireNode(args.item, "item");
+		if (DazMcp.nodeType(wnode) === "figure") {
+			return { figure: wnode.getLabel(), items: wornItems(wnode) };
+		}
+		return { figure: null, items: [wnode.getLabel()] };
+	}
+	if (args.action === "convert") {
+		var citem = DazMcp.requireNode(args.item, "item");
+		var cfig = rootFigure(citem);
+		if (DazMcp.same(cfig, citem)) {
+			throw DazMcp.fail("not_fitted", args.item + " is not fitted to a figure. Fit it first.");
+		}
+		var cr = rigReport(citem);
+		var cs = shapeReport(cfig, citem);
+		if (cr && cr.converted && !(cs && cs.other_shape) && !args.force) {
+			return { converted: false, already: true, rig: cr, shape: cs };
+		}
+		var conv = convertItem(cfig, citem, args.clone || (cs && cs.other_shape ? cs.best_clone : null));
+		return conv.report || conv;
+	}
 	var item = DazMcp.requireNode(args.item, "item");
 	var fig, before, out, name, b, missing = [], pose = args.pose || null, k, old, verts, low, floor, dy, pos, has = false;
 	if (DazMcp.nodeType(item) === "bone") { item = DazMcp.ownerFigure(item); }
@@ -364,7 +734,7 @@ function dazmcpTool(args) {
 		fig = DazMcp.requireFigure(args.figure);
 		if (DazMcp.nodeType(fig) === "fitted_figure") { fig = fig.getFollowTarget(); }
 	} else {
-		fig = DazMcp.nodeType(item) === "fitted_figure" ? item.getFollowTarget() : null;
+		fig = DazMcp.nodeType(item) === "fitted_figure" ? rootFigure(item) : null;
 		if (!fig) {
 			throw DazMcp.fail("not_fitted", args.item + " is not fitted to a figure. Fit it first (content_load " +
 				"with a target, or wearable_fit) or pass figure.");
@@ -373,7 +743,7 @@ function dazmcpTool(args) {
 	if (DazMcp.same(fig, item)) { throw DazMcp.fail("bad_args", "item and figure are the same node."); }
 	if (!DazMcp.cachedMesh(item)) { throw DazMcp.fail("bad_args", args.item + " has no mesh."); }
 
-	before = report(fig, item);
+	before = report(fig, item, args.floor_y);
 	if (args.action !== "fix") { return before; }
 
 	out = { item: before.item, figure: before.figure, before: { feet: before.feet, problems: before.problems,
@@ -435,7 +805,7 @@ function dazmcpTool(args) {
 		}
 	}
 
-	out.after = report(fig, item);
+	out.after = report(fig, item, args.floor_y);
 	out.verdict = out.after.verdict;
 	return out;
 }

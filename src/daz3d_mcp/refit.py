@@ -196,6 +196,29 @@ def translate_weights(weights: dict[str, list[list[float]]], to_style: str
     return {b: [[i, round(w, 5)] for i, w in sorted(acc.items())] for b, acc in merged.items()}, None
 
 
+_CLONE_BY_FOLDER = [
+    (re.compile(r"genesis[ _]?9", re.I), "CloneGenesis9"),
+    (re.compile(r"genesis[ _]?8(?:\.1)?[ _]?male", re.I), "CloneGenesis8Male"),
+    (re.compile(r"genesis[ _]?8(?:\.1)?[ _]?female", re.I), "CloneGenesis8Female"),
+    (re.compile(r"genesis[ _]?3[ _]?male", re.I), "CloneGenesis3Male"),
+    (re.compile(r"genesis[ _]?3[ _]?female", re.I), "CloneGenesis3Female"),
+    (re.compile(r"genesis[ _]?2[ _]?male", re.I), "CloneGenesis2Male"),
+    (re.compile(r"genesis[ _]?2[ _]?female", re.I), "CloneGenesis2Female"),
+]
+
+
+def clone_for(path: str | None) -> str | None:
+    """The clone morph that gives a figure the body an item was made for, from where the
+    item's file sits ("People/Genesis 8 Female/Clothing/..." -> CloneGenesis8Female)."""
+    if not path:
+        return None
+    text = str(path).replace("\\", "/")
+    for pattern, clone in _CLONE_BY_FOLDER:
+        if pattern.search(text):
+            return clone
+    return None
+
+
 def _norm(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", str(text).lower())
 

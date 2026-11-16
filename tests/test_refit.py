@@ -145,7 +145,7 @@ def test_check_sees_the_feet_floating_over_the_soles(client):
     res = client.run_tool("wearable_refit", {"item": "Night Out Heels"})
     assert res["figure"] == "Genesis 9" and res["bone_style"] == "genesis9" and res["footwear"]
     assert res["verdict"] == "misplaced"
-    assert {p["code"] for p in res["problems"]} == {"foot_floating"}
+    assert {p["code"] for p in res["problems"]} == {"foot_floating", "below_floor"}
     left = res["feet"]["left"]
     assert left["under_foot"] > 0.8 and left["floating"] > 0.9 and left["median_gap_cm"] > 3
     assert res["lowest_cm"]["item"] == -9 and res["lowest_cm"]["bare_feet"] > -3
@@ -227,3 +227,71 @@ def test_tool_takes_a_pose_by_hand(server):
     assert res["after"]["foot_rotation"]["l_foot"] == [20, 0, 0] and "ground" not in res
     none = call(server, "wearable_refit", item="Night Out Heels", fix=True, foot_pose="none", ground=False)
     assert "pose" not in none["done"] and "No foot pose" in none["notes"][-1]
+
+
+# ------------------------------------------- clothing of another generation ----
+def add_top(bridge, label="Bardot Top", skin=None, fitted_to="Genesis 9"):
+    """A top Auto-Fit put on Genesis 9 without converting it: still rigged to Genesis 8 bones."""
+    state = json.loads(bridge.state.read_text())
+    target = next(n for n in state["nodes"] if n["label"] == fitted_to)
+    node_id = state["nextId"]
+    state["nextId"] = node_id + 1
+    boxes = [[[-14, 120, -10], [14, 150, 12]]]
+    state["nodes"].append({"id": node_id, "class": "DzFigure", "label": label, "name": label.replace(" ", ""),
+                           "parent": target["id"], "fitted_to": target["id"], "position": [0, 0, 0],
+                           "rotation": [0, 0, 0], "geometry": True, "mesh_boxes": boxes,
+                           "bbox_local": boxes[0],
+                           "skin": skin or {"chestUpper": 300, "lCollar": 80, "rCollar": 80, "hip": 10}})
+    bridge.state.write_text(json.dumps(state))
+
+
+def test_clone_for_reads_the_generation_from_the_items_folder():
+    assert refit.clone_for("C:/Lib/People/Genesis 8 Female/Clothing/Bardot/Bardot Top.duf") == "CloneGenesis8Female"
+    assert refit.clone_for("People/Genesis 8.1 Male/Clothing/Jacket.duf") == "CloneGenesis8Male"
+    assert refit.clone_for(r"People\Genesis 9\Clothing\Worker Uniform\Boots.duf") == "CloneGenesis9"
+    assert refit.clone_for("Props/Chair.duf") is None and refit.clone_for(None) is None
+
+
+def test_check_sees_a_top_still_rigged_to_the_other_generation(bridge, client):
+    add_top(bridge)
+    res = client.run_tool("wearable_refit", {"item": "Bardot Top"})
+    assert res["footwear"] is False and res["feet"] is None
+    assert res["rig"]["converted"] is False and res["rig"]["item_bones"] == "genesis8"
+    assert res["rig"]["matched_share"] < 0.1 and "chestUpper" in res["rig"]["unmatched"]
+    assert [p["code"] for p in res["problems"]] == ["not_converted"]
+
+
+def test_convert_rebuilds_the_top_with_the_clone_and_keeps_what_hangs_from_it(bridge, client):
+    add_top(bridge)
+    add_top(bridge, label="Bardot Belt", skin={"abdomenUpper": 40}, fitted_to="Bardot Top")
+    res = client.run_tool("wearable_refit", {"item": "Bardot Top", "action": "convert",
+                                              "clone": "CloneGenesis8Female"})
+    assert res["converted"] is True and res["clone"] == "CloneGenesis8Female"
+    assert res["item"] == "Bardot Top" and res["after"]["converted"] is True
+    assert res["fitted_items"] == ["Bardot Belt"]
+    state = json.loads(bridge.state.read_text())
+    transfer = state["transfers"][-1]
+    assert transfer["base"] == "CloneGenesis8Female" and transfer["adjust_base"] and transfer["smooth"]
+    top = [n for n in state["nodes"] if n["label"] == "Bardot Top"]
+    assert len(top) == 1                                       # the old one is gone
+    belt = next(n for n in state["nodes"] if n["label"] == "Bardot Belt")
+    assert belt["fitted_to"] == top[0]["id"]
+    again = client.run_tool("wearable_refit", {"item": "Bardot Top", "action": "convert"})
+    assert again["converted"] is False and again["already"] is True
+    # the belt is still Genesis 8: converting it fits it to the figure
+    belt_res = client.run_tool("wearable_refit", {"item": "Bardot Belt", "action": "convert"})
+    assert belt_res["converted"] is True and belt_res["clone"] == "CloneGenesis8Female"
+
+
+def test_tool_rebuilds_everything_a_figure_wears(bridge, server):
+    add_top(bridge)
+    res = call(server, "wearable_refit", item="Genesis 9")
+    assert res["figure"] == "Genesis 9" and res["verdict"] == "misplaced"
+    by = {r["item"]: r for r in res["items"]}
+    assert by["Bardot Top"]["problems"] == ["not_converted"]
+    assert "Night Out Heels" in by
+    fixed = call(server, "wearable_refit", item="Genesis 9", fix=True)
+    top = next(r for r in fixed["items"] if r["item"] == "Bardot Top")
+    assert top["converted"][0]["clone"] == "CloneGenesis8Female" and top["verdict"] == "ok"
+    one = call(server, "wearable_refit", item="Bardot Top")
+    assert one["verdict"] == "ok" and one["rig"]["converted"] is True

@@ -66,7 +66,7 @@ def test_shot_and_reverse_shot_stay_on_one_side_of_the_line(client):
     assert a["camera"] == "Shot" and b["camera"] == "Shot B" and b["active"] is True
     # eye level, 30 degrees off the eyeline, sized for the head
     assert a["position"][1] == pytest.approx(a["looking_at"][1], abs=0.01)
-    assert a["focal_length"] == 85 and 100 < a["distance_cm"] < 220
+    assert a["focal_length"] == 85 and 55 < a["distance_cm"] < 125
     assert a["subject_eyes"][1] > 150
     # the camera stands toward the partner: in front of Ana, on Beto's side
     assert a["position"][0] > -50 and b["position"][0] < 50
@@ -105,7 +105,7 @@ def test_over_the_shoulder_two_shot_and_blocked_heads(client):
     assert "blocked_by" not in ots and 24 <= ots["focal_length"] <= 200
 
     two = shot(client, subject="Ana", partner="Beto", shot="two_shot")
-    assert -20 < two["looking_at"][0] < 20 and two["position"][2] > 100
+    assert -20 < two["looking_at"][0] < 20 and two["position"][2] > 60
 
     on_line = shot(client, subject="Ana", partner="Beto", angle=0)
     assert on_line["blocked_by"] == ["Beto"] and "angle" in on_line["hint"]

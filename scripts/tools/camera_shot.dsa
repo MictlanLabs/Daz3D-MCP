@@ -27,7 +27,7 @@
 
 var SHOTS = {
 	// frame: picture height in head heights; eyes: where the eyes sit from the top (0..1)
-	extreme_close_up: { frame: 0.6, eyes: 0.45, focal: 100, angle: 25 },
+	extreme_close_up: { frame: 0.75, eyes: 0.36, focal: 100, angle: 25 },
 	close_up: { frame: 1.5, eyes: 0.38, focal: 85, angle: 30 },
 	medium_close_up: { frame: 2.4, eyes: 0.3, focal: 70, angle: 30 },
 	medium: { frame: 3.8, eyes: 0.24, focal: 50, angle: 35 },
@@ -186,8 +186,8 @@ function dazmcpTool(args) {
 		var apart = len(sub([P.eyes[0], 0, P.eyes[2]], [S.eyes[0], 0, S.eyes[2]]));
 		frameH = spec.frame * Math.max(S.head, P.head);
 		focal = args.focal_length || spec.focal;
-		halfV = Math.atan(18 / (aspect * focal));
-		halfW = Math.atan(18 / focal);
+		halfV = Math.atan(DazMcp.viewTangents(focal, aspect).ty);
+		halfW = Math.atan(DazMcp.viewTangents(focal, aspect).tx);
 		target = sub(mid, mul(UP, frameH * (0.5 - spec.eyes)));
 		// across the line, turned by (90 - angle) toward the subject's side of the frame
 		c = add(mul(g, Math.cos(angle * deg)), mul(n, s * Math.sin(angle * deg)));
@@ -205,10 +205,10 @@ function dazmcpTool(args) {
 		pos = add(add(P.eyes, mul(g, 32)), mul(n, s * 0.9 * P.head));
 		pos = add(pos, mul(UP, typeof args.height === "number" ? args.height : 4));
 		dist = len(sub(target, pos));
-		focal = args.focal_length || Math.max(24, Math.min(200, 18 * dist / (aspect * frameH / 2)));
+		focal = args.focal_length || Math.max(24, Math.min(200, 18 * dist / (frameH / 2)));
 	} else {
 		focal = args.focal_length || spec.focal;
-		halfV = Math.atan(18 / (aspect * focal));
+		halfV = Math.atan(DazMcp.viewTangents(focal, aspect).ty);
 		target = sub(S.eyes, mul(UP, frameH * (0.5 - spec.eyes)));
 		dist = (frameH / 2) / Math.tan(halfV);
 		if (args.max_distance && dist > args.max_distance) {
@@ -240,7 +240,7 @@ function dazmcpTool(args) {
 				} else {
 					pulled = rayLen - keep;
 					if (shotName === "over_the_shoulder" && !args.focal_length) {
-						focal = Math.max(24, Math.min(200, 18 * len(sub(target, newPos)) / (aspect * frameH / 2)));
+						focal = Math.max(24, Math.min(200, 18 * len(sub(target, newPos)) / (frameH / 2)));
 					} else {
 						// a lens shorter in step with the distance keeps the framing
 						focal = focal * keep / rayLen;
@@ -267,7 +267,7 @@ function dazmcpTool(args) {
 			gp = mul(gp, 1 / len(gp));
 			// the picture width at the face, from the lens really used (a tight room
 			// may have kept it longer than the framing needs)
-			target = add(target, mul(gp, lead * 2 * len(sub(target, pos)) * 18 / focal));
+			target = add(target, mul(gp, lead * 2 * len(sub(target, pos)) * DazMcp.viewTangents(focal, aspect).tx));
 		}
 	}
 

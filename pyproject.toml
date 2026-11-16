@@ -1,6 +1,6 @@
 [project]
 name = "daz3d-mcp"
-version = "0.5.1"
+version = "0.6.0"
 description = "MCP server and skills that let AI agents control Daz Studio"
 readme = "README.md"
 license = "Apache-2.0"

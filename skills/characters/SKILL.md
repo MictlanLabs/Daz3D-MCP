@@ -50,8 +50,9 @@ viewport_capture()
   figure)` forces a fit but results vary.
 - If `content_load` stops on an **Auto-Fit** dialog, the item is for another
   generation and Daz offers to convert it. Read `cross-generation-clothing`:
-  accept it, then check shoes with `wearable_refit` (they usually end up
-  misplaced).
+  accept it (and every further Auto-Fit dialog: an outfit asks once per
+  piece), then run `wearable_refit(item=figure, fix=true)`, which rebuilds
+  pieces left unconverted and repairs shoes.
 - A complete outfit is usually a top, a bottom (or a dress), shoes, and hair.
   Many outfits come as several files in one folder: search the folder.
 - Removing an item: `node_delete(nodes=["Item label"])`.

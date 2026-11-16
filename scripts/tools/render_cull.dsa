@@ -81,15 +81,14 @@ function viewOf(cam, aspect, margin) {
 	var fw = 36;
 	var p = DazMcp.findProp(cam, ["Frame Width (mm)", "Frame Width"]);
 	if (p && p.getValue() > 0) { fw = p.getValue(); }
-	var f = DazMcp.getFocalLength(cam);
-	var tx = (fw / 2) / f * (1 + 2 * margin);
+	var tan = DazMcp.viewTangents(DazMcp.getFocalLength(cam), aspect, fw);
 	return {
 		P: v3(cam.getWSPos()),
 		right: v3(R.multVec(new DzVec3(1, 0, 0))),
 		up: v3(R.multVec(new DzVec3(0, 1, 0))),
 		back: v3(R.multVec(new DzVec3(0, 0, 1))),
-		tx: tx,
-		ty: (fw / 2) / (aspect * f) * (1 + 2 * margin)
+		tx: tan.tx * (1 + 2 * margin),
+		ty: tan.ty * (1 + 2 * margin)
 	};
 }
 

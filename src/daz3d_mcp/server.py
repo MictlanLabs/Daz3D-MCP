@@ -36,8 +36,9 @@ light_create and environment_set set up the shot; render makes the final image.
 Dialogue scenes (visual novels): camera_shot frames a close-up, over the shoulder
 or two shot on a face, on one side of the line between the two speakers;
 render_shots renders a whole conversation, one image per line.
-Clothes from another Genesis generation: answer the Auto-Fit dialog with Accept,
-then wearable_refit checks and repairs shoes that ended up misplaced.
+Clothes from another Genesis generation: answer each Auto-Fit dialog with Accept
+(an outfit asks once per piece), then wearable_refit(figure, fix=true) rebuilds
+pieces left unconverted and repairs shoes that ended up misplaced.
 Lighter renders: render_cull leaves out of the render what a camera cannot see
 (out of the picture, behind it, under other clothing); render, render_shots and
 render_animation do it per shot with cull=true.
@@ -98,6 +99,32 @@ def create_server(client: DazClient | None = None) -> FastMCP:
         info = await call("status")
         return {"mcp_version": __version__, "bridge": bridge, "daz": info}
 
+    def _look_for_more(out: dict, settle: float = 4.0, longest: float = 120.0) -> None:
+        """Daz can open the next dialog only after the call it stopped has finished: loading an
+        outfit from another generation asks Auto-Fit once per item, and the items whose dialog
+        nobody answers stay unconverted (still in the other generation's shape and bones)."""
+        client = get_client()
+        start = last_busy = time.monotonic()
+        while True:
+            try:
+                listing = client.dialogs()
+            except DazError:
+                return
+            open_ = [d for d in listing.get("dialogs", []) if not d.get("progress")]
+            if open_:
+                out["more_dialogs"] = open_
+                out["hint"] = ("Daz opened another dialog after this one" +
+                               (" (Auto-Fit asks once for each item of an outfit)" if any(
+                                   "Auto-Fit" in str(d.get("title")) for d in open_) else "") +
+                               ": answer it with daz_dialog too, or that item stays as it is.")
+                return
+            now = time.monotonic()
+            if any(d.get("progress") for d in listing.get("dialogs", [])):
+                last_busy = now   # a conversion is running: the next dialog may follow it
+            if now - last_busy > settle or now - start > longest:
+                return
+            time.sleep(0.5)
+
     @mcp.tool(annotations=DESTRUCTIVE)
     async def daz_dialog(
         button: Annotated[str | None, Field(description="Button to press, as listed (e.g. \"Yes\", \"Replace\"); "
@@ -119,7 +146,10 @@ def create_server(client: DazClient | None = None) -> FastMCP:
 
         def work() -> dict:
             if button or check or uncheck:
-                return client.answer_dialog(button, dialog_id, check, uncheck, wait)
+                out = client.answer_dialog(button, dialog_id, check, uncheck, wait)
+                if "call_result" in out:
+                    _look_for_more(out)
+                return out
             listing = client.dialogs()
             if listing.get("waiting_call") and not [d for d in listing["dialogs"] if not d.get("progress")]:
                 done = client.wait_pending(wait)

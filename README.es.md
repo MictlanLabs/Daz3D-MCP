@@ -119,7 +119,7 @@ script. Es más lento pero no necesita compilar nada.
 | `content_add_library` | Agrega una carpeta a las bibliotecas de contenido de Daz Studio |
 | `mesh_inspect` / `import_mesh` | Lee un OBJ o FBX (tamaño, unidades, texturas) / lo importa al tamaño correcto, sin diálogos |
 | `wearable_from_mesh` | Convierte una prenda importada en ropa que sigue a una figura (Transfer Utility) |
-| `wearable_refit` | Revisa y repara zapatos hechos para otra generación de Genesis tras el Auto-Fit (pie plano que atraviesa un zapato de tacón, zapato bajo el piso): pone los pies en la pose que pide el archivo del zapato, conserva su forma, restaura sus pesos y apoya la figura sobre las suelas |
+| `wearable_refit` | Revisa y repara ropa y zapatos hechos para otra generación de Genesis tras el Auto-Fit, una prenda o todo lo que viste una figura: reconstruye las prendas que quedaron con los huesos o la forma de la otra generación (Transfer Utility con el clon) y, en zapatos, pone los pies en la pose que pide el archivo del zapato, conserva su forma, restaura sus pesos y apoya la figura sobre las suelas |
 | `wearable_adjust` | Suavizado y colisión de la ropa (corrige la piel que atraviesa la tela) |
 | `anim_timeline` | Fotogramas por segundo, rango, frame actual y qué está animado |
 | `anim_keys_set` / `anim_keys_get` / `anim_keys_delete` | Keyframes en huesos, cadera, nodos, morphs y cualquier propiedad numérica |

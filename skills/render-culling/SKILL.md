@@ -148,3 +148,23 @@ much each beat hid.
 
 **An animation loop from three cameras:** one `render_animation(camera=...,
 cull=true)` per camera; each tests 12 frames of its range.
+
+## What it saves, measured
+
+Daz Studio 6.26, RTX 5060 8 GB, the saloon set (one 1.8 M facet mesh) with
+two talking characters and three more people around the room, 1280x720, 500
+samples, denoiser on:
+
+| shot | without cull | with cull | image |
+|---|---|---|---|
+| close-up | 232 s, and 674 s on a second run (stopped at the time limit) | 82-83 s | mean difference 0.3 of 255, no pixel off by more than 25 |
+| two shot | 478 s (stopped at the time limit) | 73 s | mean difference 0.3 of 255 |
+
+It hid 12 % of the facets and 355 MB of textures for the close-up, 1 % for the
+two shot, yet both got 3 to 6 times faster: the whole scene did not fit in
+the card's memory, Iray slowed to a fraction of its speed (0.4-2 million
+samples a second against 7 with the culled scene) and the CPU took part of
+the work. The saving comes from staying under the GPU's memory, so it is
+largest on cards of 8 GB or less, with several characters in the set and
+heavy hair; on a scene that already fits it is small (73 s against 83 s on a
+light close-up).

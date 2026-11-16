@@ -1,14 +1,14 @@
 ---
 name: cross-generation-clothing
-description: How to put clothing and shoes made for one Genesis generation on a figure of another (Genesis 8 or 8.1 items on Genesis 9 and the reverse) with the daz3d MCP tools - the Auto-Fit dialog, and finding and repairing what Auto-Fit leaves wrong, above all shoes that end up in the wrong place (the foot flat through a heeled shoe, the shoe sunk under the floor or in the middle of the foot). Use when content_load opens the Auto-Fit dialog or warns an item is for another generation, when the only clothes or shoes the user has are for another Genesis, or when shoes look misplaced in a capture or render.
+description: How to put clothing and shoes made for one Genesis generation on a figure of another (Genesis 8 or 8.1 items on Genesis 9 and the reverse) with the daz3d MCP tools - the Auto-Fit dialog, and finding and repairing what Auto-Fit leaves wrong (pieces left in the old figure's shape and bones that do not follow the pose, belts fitted to other clothes), above all shoes that end up in the wrong place (the foot flat through a heeled shoe, the shoe sunk under the floor or in the middle of the foot). Use when content_load opens the Auto-Fit dialog or warns an item is for another generation, when the only clothes or shoes the user has are for another Genesis, or when shoes look misplaced in a capture or render.
 ---
 
 # Clothing from another Genesis generation
 
 Read `characters` first. Content is made for one generation: Genesis 8 and
 8.1 share theirs, Genesis 9 has its own. Daz can convert an item on load
-(Auto-Fit), and the result is usually fine for tight clothes and wrong for
-shoes. This is the routine that fixes it.
+(Auto-Fit), but it often leaves pieces unconverted and gets shoes wrong.
+`wearable_refit` finds and repairs both. This is the routine.
 
 ## 1. Load: the Auto-Fit dialog
 
@@ -31,9 +31,48 @@ daz_dialog(button="Accept")                                 -> call_result: fitt
 - No dialog and the warning "not fitted ... another figure generation": there
   is no clone. Use `wearable_from_mesh(item, figure)` (see
   `third-party-assets`), then continue here.
-- An outfit loads one dialog per piece. Answer each.
+- An outfit asks once **per piece**, and only the first dialog stops the
+  `content_load` call: the others open after it returns. `daz_dialog` lists
+  them in `more_dialogs` with a hint; answer every one. A piece whose dialog
+  nobody answers stays in the old figure's shape and bones.
+- The buttons named after a figure ("Genesis 9", "Genesis 8 Female") and
+  "None" pick which figure the item was made for. The right one is usually
+  already picked; pressing it first (`daz_dialog(button="Genesis 9",
+  wait=0)`) and then **Accept** is harmless.
 
-## 2. Check every converted piece of footwear
+## 2. Check the whole figure
+
+```text
+wearable_refit(item="Laura")                 # a figure: everything she wears
+   -> items: [{item: "Bardot Top", verdict: "misplaced", problems: ["not_converted"]},
+              {item: "Bardot Sandals", problems: ["foot_floating", "pose_not_applied"]}, ...]
+wearable_refit(item="Laura", fix=true)       # repairs each piece that is not ok
+```
+
+Run it after loading any clothes from another generation, before posing and
+rendering: an unconverted piece can look right in the default pose and only
+go wrong when the arms or legs move. For every piece (tops, pants, belts,
+helmets, shoes) it reports:
+
+- `rig`: how much of the item hangs from bones the figure has
+  (`matched_share`). Under half (`not_converted`): it is still rigged to the
+  old generation's bones (`l_upperarm` on a Genesis 8 figure, `chestUpper` on
+  Genesis 9), so it keeps the old body's shape and stays put when she moves.
+  This happens to the pieces whose Auto-Fit dialog was never answered, and to
+  items fitted to other items (a belt on an overall).
+- `shape`: median distance from the item to the skin, as it is and with each
+  of the figure's clone shapes dialed in. Much closer with a clone
+  (`other_shape`): it was rigged but not reshaped.
+
+`fix=true` rebuilds such a piece with Daz's Transfer Utility, which is what
+Auto-Fit does when it converts: the figure takes the old generation's shape
+(its clone), the figure's rigging is projected onto the item, and the item is
+moved to the figure's own shape. Items fitted to it (belts, zips, buttons)
+are moved to the rebuilt piece and converted too. `convert=false` skips it.
+Then footwear goes through the steps below.
+
+## 3. Footwear in detail
+
 
 ```text
 wearable_refit(item="Bardot Sandals")
@@ -60,6 +99,13 @@ It changes nothing and reports:
 | `foot_floating` | the foot is flat above a sole made for a raised heel |
 | `foot_through_sole` | the foot goes down through the sole |
 | `not_under_foot` | the item is not under the foot at all (wrong place, wrong scale) |
+| `below_floor` | the sole is under the floor; `fix` stands the figure on it |
+| `not_converted`, `other_shape` | see above: the piece is rebuilt first |
+
+`feet.*.heel_minus_toe_cm` tells a missing heel pose (the heel floats far
+more than the toes) from a thick flat sole: boots whose insole is not
+modeled leave an even 2 to 3 cm under the whole foot, reported as a note,
+not a problem.
 
 Why it happens: a heeled shoe is modeled around a foot already in the heel
 pose, and its file sets that pose when it loads. On another generation the
@@ -67,7 +113,7 @@ pose is lost, so the foot stays flat: the heel pokes through the back of the
 shoe, the toes float over the front, and the sole sits several cm under the
 floor.
 
-## 3. Repair
+### Repair
 
 ```text
 wearable_refit(item="Bardot Sandals", fix=true)
@@ -118,8 +164,8 @@ more after loading a pose, or keep the feet out of it by posing with
 
 ## 4. The rest of the outfit
 
-Tops, pants, skirts and dresses converted by Auto-Fit rarely end up in the
-wrong place; their faults are skin poking through and loose shapes.
+Once `wearable_refit` reports a piece `ok`, what is left is cosmetic: skin
+poking through and loose shapes.
 
 - Look from two sides (`camera_set(yaw=...)`) in the pose the scene uses.
 - Skin through the cloth: `wearable_adjust(item, smoothing=true,
@@ -129,8 +175,8 @@ wrong place; their faults are skin poking through and loose shapes.
 - Long skirts and coats lose the bones that moved them (Auto-Fit keeps only
   the figure's). They hang stiff between the legs in wide poses: prefer an
   item for the right generation, or keep the pose narrow.
-- Gloves and hats: check them as closely as shoes; `wearable_refit(item)`
-  reports only feet, so use a capture.
+- Gloves and hats: `wearable_refit(item)` checks their rig and shape; look
+  at a capture for the fit.
 - Hair: **Accept**, then look at the hairline from the front and the side.
 - Covered by clothing anyway? Hide the body part instead of fighting the last
   poke: see "Fixing poke-through" in `third-party-assets`.
@@ -144,5 +190,5 @@ wrong place; their faults are skin poking through and loose shapes.
   render means stop and repair.
 - Tell the user what was converted and repaired, and show the feet from the
   side.
-- `wearable_refit` checks feet. It does not judge style: a shoe two sizes too
+- `wearable_refit` checks rig, shape and feet. It does not judge style: a shoe two sizes too
   big for a small character still reports `ok`. Look at the capture.

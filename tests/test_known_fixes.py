@@ -146,11 +146,11 @@ def pair(client, bridge, content_library):
 
 def test_camera_shot_stays_in_front_of_a_wall(pair, bridge):
     free = pair.run_tool("camera_shot", {"subject": "Ana", "partner": "Beto", "shot": "close_up"})
-    assert free["position"][2] > 72 and "wall_cm" not in free
-    add_wall(bridge, 70)
+    assert free["position"][2] > 42 and "wall_cm" not in free
+    add_wall(bridge, 40)
     res = pair.run_tool("camera_shot", {"subject": "Ana", "partner": "Beto", "shot": "close_up"})
     assert res["wall"] == "Wall" and res["pulled_in_cm"] > 0
-    assert res["position"][2] < 70 - 15  # in the room, clear of the wall
+    assert res["position"][2] < 40 - 15  # in the room, clear of the wall
     # a shorter lens keeps the head the same size in the picture
     assert res["focal_length"] / res["distance_cm"] == pytest.approx(
         free["focal_length"] / free["distance_cm"], rel=0.03)

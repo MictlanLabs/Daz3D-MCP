@@ -532,6 +532,16 @@ DazMcp.renderAspect = function () {
 	return size && size.height ? size.width / size.height : 16 / 9;
 };
 
+// Half the picture per cm of distance, across (tx) and up (ty). Daz Studio
+// spreads the camera's Frame Width (36 mm) over the picture's HEIGHT, in
+// landscape and portrait alike (measured in Iray renders of 1280x720 and
+// 360x640): the vertical field of view is fixed by the lens, and a wider
+// picture sees more to the sides.
+DazMcp.viewTangents = function (focalMm, aspect, frameWidthMm) {
+	var ty = (frameWidthMm || 36) / 2 / focalMm;
+	return { tx: ty * (aspect || 16 / 9), ty: ty };
+};
+
 DazMcp.renderSize = function () {
 	var opts, s;
 	try {
@@ -560,8 +570,9 @@ DazMcp.getFocalLength = function (camera) {
 //   margin: 1.1 leaves 10% of room around them
 DazMcp.framePosition = function (box, focalMm, aspect, yaw, pitch, margin) {
 	var deg = Math.PI / 180;
-	var halfW = Math.atan(18 / focalMm);            // 36 mm wide frame
-	var halfH = Math.atan(18 / (aspect * focalMm));
+	var tan = DazMcp.viewTangents(focalMm, aspect);
+	var halfW = Math.atan(tan.tx);
+	var halfH = Math.atan(tan.ty);
 	var sx = box.max[0] - box.min[0];
 	var sy = box.max[1] - box.min[1];
 	var sz = box.max[2] - box.min[2];
