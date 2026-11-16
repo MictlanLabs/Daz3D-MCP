@@ -43,6 +43,7 @@ var INHERITS = {
 	DzSpotLight: ["DzSpotLight", "DzDistantLight", "DzLight", "DzCamera", "DzNode", "DzElement"],
 	DzPointLight: ["DzPointLight", "DzLight", "DzCamera", "DzNode", "DzElement"],
 	DzGroupNode: ["DzGroupNode", "DzNode", "DzElement"],
+	DzTonemapperNode: ["DzTonemapperNode", "DzNode", "DzElement"],
 	DzGeometryShellNode: ["DzGeometryShellNode", "DzNode", "DzElement"],
 	DzNode: ["DzNode", "DzElement"]
 };
@@ -168,10 +169,25 @@ function defaultRenderProps() {
 	};
 }
 
+var TONEMAPPER_PROPS = ["Exposure Value", "Shutter Speed (1/x)", "F/Stop", "Film ISO"];
+
+function hasTonemapper() {
+	return !state.noTonemapper || state.nodes.some(function (n) { return n.class === "DzTonemapperNode"; });
+}
+
+function renderElementProps() {
+	if (hasTonemapper()) { return state.renderProps; }
+	var out = {};
+	Object.keys(state.renderProps).forEach(function (k) {
+		if (TONEMAPPER_PROPS.indexOf(k) < 0) { out[k] = state.renderProps[k]; }
+	});
+	return out;
+}
+
 // The exposure Iray really renders with (EV at ISO 100).
 function renderedEv() {
 	var r = state.renderProps;
-	if (!r["Shutter Speed (1/x)"]) { return null; }
+	if (!r["Shutter Speed (1/x)"] || !hasTonemapper()) { return null; }
 	var n = r["F/Stop"].value;
 	return Math.log(n * n * r["Shutter Speed (1/x)"].value * 100 / r["Film ISO"].value) / Math.LN2;
 }
@@ -179,7 +195,7 @@ function renderedEv() {
 function lightProps(kind) {
 	var p = {
 		"Color": { type: "color", value: [1, 1, 1] },
-		"Illumination": { type: "enum", value: 1, items: ["Off", "On", "On (No Shadow)"] }
+		"Illumination": { type: "enum", value: 3, items: ["Off", "Diffuse Only", "Specular Only", "On"] }
 	};
 	if (kind === "distant") {
 		p.Intensity = { type: "float", value: 1, min: 0, max: 1000 };
@@ -791,6 +807,7 @@ global.DzBasicCamera = function () {
 global.DzSpotLight = function () { return newNode("DzSpotLight", "Spotlight", lightProps("spot")); };
 global.DzPointLight = function () { return newNode("DzPointLight", "Point Light", lightProps("point")); };
 global.DzDistantLight = function () { return newNode("DzDistantLight", "Distant Light", lightProps("distant")); };
+global.DzTonemapperNode = function () { return newNode("DzTonemapperNode", "Tonemapper Options", {}); };
 
 global.DzScene = { OpenNew: 0, MergeFile: 1 };
 global.DzApp = { NoInterface: 0 };
@@ -876,7 +893,7 @@ global.Scene = {
 		changed();
 		return true;
 	},
-	clear: function () { state.nodes = []; state.filename = ""; state.modified = false; saveState(); },
+	clear: function () { state.nodes = []; state.filename = ""; state.modified = false; state.noTonemapper = true; saveState(); },
 	loadScene: function (file, method) {
 		var data;
 		try { data = JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { return 1; }
@@ -1129,7 +1146,7 @@ function renderSummary(cam) {
 var renderMgr = {
 	getRenderOptions: renderOptions,
 	getActiveRenderer: function () { return { getName: function () { return "NVIDIA Iray"; } }; },
-	getRenderElementObjects: function () { return [generalRenderElement(), propertyHost(state.renderProps)]; },
+	getRenderElementObjects: function () { return [generalRenderElement(), propertyHost(renderElementProps())]; },
 	doRender: function () {
 		if (state.render.toId !== DzRenderOptions.DirectToFile || !state.render.filename) { return false; }
 		var cam = viewport3d.getCamera();

@@ -35,7 +35,9 @@ var ROLES = {
 	press: ["facs_ctrl_MouthPress"],
 	shrug_lower: ["facs_ctrl_MouthShrugLower", "facs_bs_MouthShrugLower_div2"],
 	pucker: ["facs_ctrl_MouthPucker", "facs_bs_MouthPucker_div2"],
-	funnel: ["facs_ctrl_MouthFunnel", "facs_bs_MouthFunnel_div2"]
+	funnel: ["facs_ctrl_MouthFunnel", "facs_bs_MouthFunnel_div2"],
+	lower_down: ["facs_ctrl_MouthLowerDown"],
+	angry_g8: ["facs_ctrl_Angry"]
 };
 
 // Left and right are the figure's own.
@@ -55,6 +57,22 @@ var EXPRESSIONS = {
 	mouth_open: { jaw_open: 0.55 },
 	kiss: { pucker: 0.9 }
 };
+
+var GENESIS8_EXPRESSIONS = {
+	angry: { angry_g8: 0.8, press: 0.4, lower_down: -0.4 }
+};
+
+function recipeFor(expr, generation, byName) {
+	var g8 = GENESIS8_EXPRESSIONS[expr];
+	var role;
+	if (g8 && /genesis 8/i.test(generation || "")) {
+		for (role in g8) {
+			if (g8.hasOwnProperty(role) && !byName[DazMcp.lower(ROLES[role][0])]) { return EXPRESSIONS[expr]; }
+		}
+		return g8;
+	}
+	return EXPRESSIONS[expr];
+}
 
 // Dials that belong to the face: everything under Pose Controls/Head, and the
 // FACS neck dials (not the Neck-Head bend/twist pose dials).
@@ -126,7 +144,7 @@ function dazmcpTool(args) {
 	}
 
 	if (expr) {
-		recipe = EXPRESSIONS[expr];
+		recipe = recipeFor(expr, out.generation, byName);
 		for (role in recipe) {
 			if (!recipe.hasOwnProperty(role)) { continue; }
 			names = ROLES[role];

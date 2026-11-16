@@ -94,7 +94,6 @@ function coarseStart(bone, cx, cy, t) {
 }
 function aim(bone, t, share) {
 	var cx = bone.getXRotControl(), cy = bone.getYRotControl();
-	var x0 = rawOf(cx), y0 = rawOf(cy);
 	var it, k, e, en, ex, ey, J, det, dx, dy, len, x, y, sx, sy, tried, vx, vy;
 	// Start from the best point of a coarse grid over the joint's range, so
 	// the Newton steps begin near the answer (from far away, with the dials
@@ -133,8 +132,8 @@ function aim(bone, t, share) {
 		e = en;
 	}
 	if (share < 1) {
-		cx.setValue(x0 + (rawOf(cx) - x0) * share);
-		cy.setValue(y0 + (rawOf(cy) - y0) * share);
+		cx.setValue(rawOf(cx) * share);
+		cy.setValue(rawOf(cy) * share);
 	}
 	e = aimError(bone, t);
 	return {

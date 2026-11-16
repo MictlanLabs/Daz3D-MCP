@@ -149,3 +149,35 @@ def test_eye_color(client, bridge):
 
     with pytest.raises(DazError, match="Give a color"):
         client.run_tool("eye_color", {"figure": "Genesis 9"})
+
+
+def test_eyes_look_at_with_head_sets_the_turn_instead_of_adding_to_it(client):
+    first = client.run_tool("eyes_look_at", {"figure": "Genesis 9", "target": [300, 168, 20], "head": 0.5})
+    for _ in range(2):
+        again = client.run_tool("eyes_look_at", {"figure": "Genesis 9", "target": [300, 168, 20], "head": 0.5})
+    assert again["head"]["rotation"] == pytest.approx(first["head"]["rotation"], abs=0.05)
+
+
+def test_angry_on_genesis_8_1_uses_its_own_angry_dial(client, bridge):
+    state = json.loads(bridge.state.read_text())
+    fig = next(n for n in state["nodes"] if n["label"] == "Genesis 9")
+    fig["name"] = "Genesis8_1Female"
+    for label, name in (("Angry", "facs_ctrl_Angry"), ("Mouth Press", "facs_ctrl_MouthPress"),
+                        ("Mouth Lower Down", "facs_ctrl_MouthLowerDown"), ("Brow Down", "facs_ctrl_BrowDown")):
+        fig["props"][label] = {"type": "float", "name": name, "group": "/Pose Controls/Head/Expressions 8.1",
+                               "value": 0, "def": 0, "min": -1, "max": 1}
+    bridge.state.write_text(json.dumps(state))
+    res = client.run_tool("face_expression", {"figure": "Genesis 9", "expression": "angry"})
+    assert res["generation"] == "Genesis 8.1 Female"
+    assert {s["name"]: s["value"] for s in res["set"]} == {"facs_ctrl_Angry": 0.8, "facs_ctrl_MouthPress": 0.4,
+                                                          "facs_ctrl_MouthLowerDown": -0.4}
+
+
+def test_angry_on_genesis_9_keeps_the_brow_recipe(client, bridge):
+    state = json.loads(bridge.state.read_text())
+    fig = next(n for n in state["nodes"] if n["label"] == "Genesis 9")
+    fig["props"]["Angry"] = {"type": "float", "name": "facs_ctrl_Angry", "group": "/Pose Controls/Head",
+                             "value": 0, "def": 0, "min": 0, "max": 1}
+    bridge.state.write_text(json.dumps(state))
+    res = client.run_tool("face_expression", {"figure": "Genesis 9", "expression": "angry"})
+    assert "facs_ctrl_Angry" not in {s["name"] for s in res["set"]}

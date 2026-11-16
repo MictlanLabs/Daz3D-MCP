@@ -252,7 +252,7 @@ wheels = [
 
 [[package]]
 name = "daz3d-mcp"
-version = "1.0.2"
+version = "1.0.3"
 source = { editable = "." }
 dependencies = [
     { name = "mcp" },

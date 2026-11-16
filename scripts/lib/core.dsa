@@ -829,6 +829,18 @@ DazMcp.applyExposure = function (ev) {
 	return true;
 };
 
+DazMcp.ensureTonemapper = function () {
+	var all = Scene.getNodeList();
+	var i, node;
+	for (i = 0; i < all.length; i++) {
+		if (DazMcp.inherits(all[i], "DzTonemapperNode")) { return all[i]; }
+	}
+	if (typeof DzTonemapperNode === "undefined") { return null; }
+	node = new DzTonemapperNode();
+	Scene.addNode(node);
+	return node;
+};
+
 DazMcp.RENDER_LABELS = {
 	max_samples: ["Max Samples"],
 	max_time: ["Max Time (secs)", "Max Time"],
@@ -875,6 +887,7 @@ DazMcp.applyRenderSettings = function (args) {
 	}
 	var ev = typeof args.exposure === "number" ? args.exposure : null;
 	var exposureTouched = ev !== null;
+	if (exposureTouched || args.properties) { DazMcp.ensureTonemapper(); }
 	if (args.properties) {
 		for (key in args.properties) {
 			if (!args.properties.hasOwnProperty(key)) { continue; }

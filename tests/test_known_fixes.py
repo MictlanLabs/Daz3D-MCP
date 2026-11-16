@@ -288,3 +288,20 @@ def test_ground_under_the_floor_boards_is_not_the_floor(client, tmp_path):
     res = client.run_tool("import_mesh", {"path": obj.as_posix(), "scale_cm": 1, "drop_to_floor": True,
                                           "room": True})
     assert res["floor"]["was_at_y"] == 25
+
+
+def test_exposure_in_a_new_scene_makes_the_tone_mapper(client, bridge):
+    client.run_tool("scene_new", {"discard_changes": True})
+    assert "exposure" not in client.run_tool("render_settings", {})
+    res = client.run_tool("render_settings", {"exposure": 8})
+    assert res["not_found"] == [] and res["exposure"]["shutter"] == pytest.approx(4, abs=0.001)
+    client.run_tool("render_settings", {"exposure": 9})
+    tonemappers = [n for n in state(bridge)["nodes"] if n["class"] == "DzTonemapperNode"]
+    assert len(tonemappers) == 1
+
+
+def test_light_set_on_turns_illumination_on_not_diffuse_only(client):
+    client.run_tool("light_create", {"type": "spot", "label": "Key"})
+    assert client.run_tool("light_set", {"light": "Key", "on": False})["set"][-1]["value"] == "Off"
+    res = client.run_tool("light_set", {"light": "Key", "on": True})
+    assert res["set"][-1]["value"] == "On" and res["set"][-1]["index"] == 3

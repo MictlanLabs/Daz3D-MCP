@@ -12,6 +12,15 @@ noted below when it changes.
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-11-16
+
+### Fixed
+
+- `render_settings(exposure=...)` and the tone mapper properties did nothing in a new scene, which has no Tonemapper Options node until the Render Settings pane or a render makes one; the node is now created when needed.
+- `eyes_look_at` with `head > 0` added more head turn on every call; the head now takes the given share of the full turn, so repeating a call leaves it where it was.
+- `face_expression("angry")` was barely visible on Genesis 8.1, which lacks the Brow Squeeze dial; it now uses the figure's own Angry expression dial, with the mouth held closer.
+- `light_set(on=true)` set an Iray light's Illumination to "Diffuse Only" instead of "On".
+
 ### Changed
 
 - The README (English and Spanish) shows the project logo, an architecture diagram and an examples section with renders made through the tools: facial expressions, lighting, dialogue shots and an animation GIF. The images live in `docs/images/` and are linked by absolute URLs so they also show on PyPI.
@@ -192,7 +201,8 @@ plugin on the GitHub release.
 - First MCP server, bridge plugin, scene tools, `setup`, `install` and `doctor`
   commands.
 
-[Unreleased]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v1.0.2...HEAD
+[Unreleased]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v1.0.3...HEAD
+[1.0.3]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/MictlanLabs/Daz3D-MCP/releases/tag/v1.0.0
