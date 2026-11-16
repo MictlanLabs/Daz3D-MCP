@@ -12,6 +12,10 @@ noted below when it changes.
 
 ## [Unreleased]
 
+### Changed
+
+- The README (English and Spanish) shows the project logo, an architecture diagram and an examples section with renders made through the tools: facial expressions, lighting, dialogue shots and an animation GIF. The images live in `docs/images/` and are linked by absolute URLs so they also show on PyPI.
+
 ## [1.0.2] - 2026-11-16
 
 ### Fixed

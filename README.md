@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/MictlanLabs/Daz3D-MCP/main/docs/images/logo.svg" alt="Daz3D-MCP logo" width="460">
+</p>
+
 # Daz3D-MCP
 
 Let AI agents (Claude Code, Codex, Cursor, Antigravity, Gemini CLI, Claude
@@ -13,6 +17,41 @@ presets, Mixamo FBX and mocap BVH), and run DazScript.
 > **New project.** It is tested on Daz Studio 6.26 on Windows 11 with an NVIDIA
 > card, but expect rough edges. Please report problems in
 > [Issues](https://github.com/MictlanLabs/Daz3D-MCP/issues).
+
+## Examples
+
+Every image here was rendered in Daz Studio by an AI agent using these tools.
+
+### Faces and expressions
+
+`face_expression` puts named expressions on Genesis 9 and 8.1 figures;
+`eyes_look_at` and `eye_color` take care of the eyes.
+
+![The same Genesis 9 character with face_expression big_smile, surprised and angry](https://raw.githubusercontent.com/MictlanLabs/Daz3D-MCP/main/docs/images/face-expressions.jpg)
+
+### Lighting
+
+`light_create` and `environment_set` build anything from a soft studio setup to
+a low-key neon portrait.
+
+![A studio portrait with softbox key, fill and hair lights next to a dark portrait with a warm key and cyan and magenta rim lights](https://raw.githubusercontent.com/MictlanLabs/Daz3D-MCP/main/docs/images/lighting-comparison.jpg)
+
+### Dialogue scenes
+
+`camera_shot` frames close-ups, over-the-shoulder shots and two shots that keep
+the 180 degree rule, and `render_shots` renders a whole conversation, one image
+per line, for visual novels, comics and storyboards.
+
+![Five shots of a conversation between two characters in a western saloon: two shot, over the shoulder, close-up, extreme close-up and reaction shot](https://raw.githubusercontent.com/MictlanLabs/Daz3D-MCP/main/docs/images/dialogue-shots.jpg)
+
+### Animation
+
+`anim_keys_set`, animation presets and Mixamo FBX or BVH import animate
+figures; `render_animation` renders every frame to an MP4 or GIF.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/MictlanLabs/Daz3D-MCP/main/docs/images/waving-animation.gif" alt="A Genesis 9 character waving, rendered with render_animation" width="480">
+</p>
 
 ## Requirements
 
@@ -144,9 +183,7 @@ settings, token and content index.
 
 ## How it works
 
-```
-AI agent ──MCP (stdio)──> daz3d-mcp (Python) ──HTTP 127.0.0.1 + token──> bridge plugin ──> DazScript in Daz Studio
-```
+![Architecture: AI agents talk MCP over stdio to the daz3d-mcp Python server, which sends DazScript to the bridge plugin inside Daz Studio; Iray renders on the NVIDIA GPU](https://raw.githubusercontent.com/MictlanLabs/Daz3D-MCP/main/docs/images/architecture-diagram.svg)
 
 - **Bridge plugin** (`bridge/`, C++): a tiny server inside Daz Studio. It only
   listens on `127.0.0.1`, needs a token and runs DazScript on the main thread.

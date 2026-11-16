@@ -1,0 +1,302 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" xml:lang="es" role="img" aria-labelledby="title description">
+  <title id="title">Arquitectura de Daz3D-MCP</title>
+  <desc id="description">Describe la escena en lenguaje natural a Claude Code, Claude Desktop, Codex, Cursor, Antigravity o cualquier cliente MCP. El cliente se conecta mediante MCP (stdio) al servidor daz3d-mcp, que se ejecuta con uvx y ofrece 65 herramientas, habilidades e índice de contenido. El servidor usa TCP 127.0.0.1:18640 para comunicarse con el plugin puente dentro de Daz Studio 6. Una flecha discontinua indica la alternativa sin plugin, que conecta directamente con el script DAZ. El script controla la escena y el motor Iray usa una GPU NVIDIA con filtro de ruido. Se generan renders PNG, planos de diálogo numerados con shots.json y animaciones MP4/GIF para juegos y novelas visuales, como Ren'Py. Instalar: uvx daz3d-mcp setup + install --all. Windows 10/11.</desc>
+
+  <defs>
+    <style>
+      text { font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; fill: #eef3fc; }
+      .title { font-size: 53px; font-weight: 700; letter-spacing: -1.3px; }
+      .subtitle { font-size: 26px; font-weight: 400; fill: #aabad1; }
+      .heading { font-size: 28px; font-weight: 700; letter-spacing: -.45px; }
+      .label { font-size: 22px; font-weight: 600; }
+      .body { font-size: 21px; }
+      .secondary { fill: #b9c7db; }
+      .small { font-size: 20px; }
+      .mono { font-family: Consolas, 'Liberation Mono', monospace; }
+      .protocol { font-size: 19px; font-weight: 600; fill: #9cece8; }
+      .fallback-label { font-size: 19px; fill: #c3ccdd; }
+      .panel { fill: #111927; stroke: #303f54; stroke-width: 1.4; }
+      .card { fill: #192437; stroke: #2a3a50; stroke-width: 1.1; }
+      .rule { stroke: #2a384c; stroke-width: 1.2; }
+      .icon-tile { fill: #1b2c3d; }
+      .icon { color: #99e5e0; }
+      .module-icon { color: #bdb5fa; }
+      .flow { fill: none; stroke: #79e9e2; stroke-width: 2.5; marker-end: url(#arrow); }
+      .glow { fill: none; stroke: #48e1dd; stroke-width: 6; opacity: .44; filter: url(#soft-glow); }
+      .fallback { fill: none; stroke: #a6b6cc; stroke-width: 1.6; stroke-dasharray: 5 6; marker-end: url(#arrow-muted); }
+      .internal { fill: none; stroke: #8593b5; stroke-width: 1.5; marker-end: url(#arrow-internal); }
+      .shot-number { fill: #f5f5ff; font-size: 15px; font-weight: 700; }
+    </style>
+
+    <filter id="soft-glow" filterUnits="userSpaceOnUse" x="240" y="219" width="1020" height="552" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="4.5"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="12" markerHeight="12" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M1 1l10 5-10 5z" fill="#79e9e2"/>
+    </marker>
+    <marker id="arrow-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M1 1l8 4-8 4z" fill="#a6b6cc"/>
+    </marker>
+    <marker id="arrow-internal" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M1 1l6 3-6 3z" fill="#8593b5"/>
+    </marker>
+
+    <symbol id="icon-flow" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="2" y="9" width="6" height="6" rx="1.3"/><rect x="16" y="2" width="6" height="6" rx="1.3"/><rect x="16" y="16" width="6" height="6" rx="1.3"/>
+        <path d="M8 12h4m4-7h-2a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h2"/>
+      </g>
+    </symbol>
+    <symbol id="icon-message" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M5 4.5h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-8.5L6 21v-3.5H5a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2z"/>
+        <path d="M7 9h10M7 13h6"/>
+      </g>
+    </symbol>
+    <symbol id="icon-server" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+        <rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/>
+        <path d="M7 7.5h1m-1 9h1m5-9h4m-4 9h4"/>
+      </g>
+    </symbol>
+    <symbol id="icon-terminal" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="2.5" y="4.5" width="19" height="15" rx="2"/><path d="m7 9 3 3-3 3m6 0h4"/>
+      </g>
+    </symbol>
+    <symbol id="icon-book" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 6c-2.5-2-5-2.5-9-2v14c4-.5 6.5 0 9 2 2.5-2 5-2.5 9-2V4c-4-.5-6.5 0-9 2zm0 0v14"/>
+      </g>
+    </symbol>
+    <symbol id="icon-index" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 9V6a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v1"/><rect x="3" y="9" width="18" height="11" rx="2"/><path d="M9 14h6"/>
+      </g>
+    </symbol>
+    <symbol id="icon-cube" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="m12 2.5 9 5.2v8.6L12 21.5l-9-5.2V7.7zM3 7.7l9 5.2 9-5.2m-9 5.2v8.6"/>
+      </g>
+    </symbol>
+    <symbol id="icon-plug" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M8 3v5m8-5v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4M4 8h16"/>
+      </g>
+    </symbol>
+    <symbol id="icon-aperture" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="9"/><path d="M10 3.3 15 12m3.4-6.4-5 8.7m7.3-.3h-10m3.3 6.7L9 12m-3.4 6.4 5-8.7M3.3 10h10"/>
+      </g>
+    </symbol>
+    <symbol id="icon-gpu" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="5.5" y="5.5" width="13" height="13" rx="2"/><rect x="9" y="9" width="6" height="6" rx=".7"/>
+        <path d="M9 3v2.5M15 3v2.5M9 18.5V21m6-2.5V21M3 9h2.5M3 15h2.5m13-6H21m-2.5 6H21"/>
+      </g>
+    </symbol>
+    <symbol id="icon-image" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="15.8" cy="9" r="1.4"/><path d="m3 16 5.6-5.6 5.7 5.7 2.5-2.5 4.2 4"/>
+      </g>
+    </symbol>
+    <symbol id="icon-monitor" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="4" width="18" height="13" rx="2"/><path d="M12 17v3m-4 0h8"/>
+      </g>
+    </symbol>
+
+    <clipPath id="render-clip"><rect width="262" height="76" rx="9"/></clipPath>
+    <clipPath id="shot-clip"><rect width="82" height="62" rx="8"/></clipPath>
+    <pattern id="film-perforations" width="17" height="4" patternUnits="userSpaceOnUse">
+      <rect width="7" height="3" rx="1" fill="#6a6b83"/>
+    </pattern>
+  </defs>
+
+  <rect width="1600" height="900" fill="#0b111d"/>
+
+  <g id="header">
+    <rect x="56" y="54" width="50" height="50" rx="13" fill="#18303b" stroke="#2b5159"/>
+    <use href="#icon-flow" x="68" y="66" width="26" height="26" class="icon"/>
+    <text x="124" y="97" class="title">Daz3D-MCP</text>
+    <text x="435" y="96" class="subtitle">Arquitectura</text>
+    <path d="M56 133H1544" class="rule"/>
+  </g>
+
+  <g id="agents">
+    <rect x="56" y="174" width="218" height="468" rx="21" class="panel"/>
+    <rect x="74" y="193" width="36" height="36" rx="9" class="icon-tile"/>
+    <use href="#icon-message" x="81" y="200" width="22" height="22" class="icon"/>
+    <text x="118" y="221" class="heading" style="font-size: 22px">Agentes de IA</text>
+    <g class="body">
+      <rect x="74" y="246" width="182" height="44" rx="9" class="card"/>
+      <rect x="74" y="299" width="182" height="44" rx="9" class="card"/>
+      <rect x="74" y="352" width="182" height="44" rx="9" class="card"/>
+      <rect x="74" y="405" width="182" height="44" rx="9" class="card"/>
+      <rect x="74" y="458" width="182" height="44" rx="9" class="card"/>
+      <rect x="74" y="511" width="182" height="44" rx="9" class="card"/>
+      <path d="M87 268h5m-5 53h5m-5 53h5m-5 53h5m-5 53h5m-5 53h5" fill="none" stroke="#78bfc2" stroke-width="2" stroke-linecap="round"/>
+      <text x="101" y="275">Claude Code</text>
+      <text x="101" y="328">Claude Desktop</text>
+      <text x="101" y="381">Codex</text>
+      <text x="101" y="434">Cursor</text>
+      <text x="101" y="487">Antigravity</text>
+      <text x="101" y="529" font-size="17.5">Cualquier <tspan x="101" y="548">cliente MCP</tspan></text>
+    </g>
+    <text x="75" y="591" class="small secondary">Describe la escena <tspan x="75" y="617">en lenguaje natural</tspan></text>
+  </g>
+
+  <g id="server">
+    <rect x="390" y="174" width="323" height="402" rx="21" class="panel"/>
+    <rect x="410" y="193" width="36" height="36" rx="9" class="icon-tile"/>
+    <use href="#icon-server" x="417" y="200" width="22" height="22" class="icon"/>
+    <text x="453" y="221" class="heading" style="font-size: 26px">Servidor daz3d-mcp</text>
+    <text x="410" y="266" class="body secondary">(Python, se ejecuta con uvx)</text>
+
+    <rect x="410" y="297" width="283" height="51" rx="10" class="card"/>
+    <use href="#icon-terminal" x="426" y="312" width="21" height="21" class="icon"/>
+    <text x="459" y="330" class="label">65 herramientas</text>
+
+    <rect x="410" y="362" width="283" height="128" rx="10" class="card"/>
+    <use href="#icon-book" x="426" y="375" width="21" height="21" class="icon"/>
+    <text x="459" y="394" class="label">Habilidades</text>
+    <text x="426" y="423" class="small secondary">(escenas, personajes, rostros, <tspan x="426" y="448">poses, diálogos, animación </tspan><tspan x="426" y="473">y renderizado)</tspan></text>
+
+    <rect x="410" y="504" width="283" height="51" rx="10" class="card"/>
+    <use href="#icon-index" x="426" y="519" width="21" height="21" class="icon"/>
+    <text x="459" y="537" class="label">Índice de contenido</text>
+
+    <text x="391" y="615" class="small secondary">Instalar:</text>
+    <text x="466" y="615" class="small mono">uvx daz3d-mcp setup <tspan x="466" y="642">+ install --all</tspan></text>
+  </g>
+
+  <g id="studio">
+    <rect x="880" y="174" width="287" height="465" rx="21" fill="#15192a" stroke="#555575" stroke-width="1.4"/>
+    <rect x="900" y="193" width="36" height="36" rx="9" fill="#292642"/>
+    <use href="#icon-cube" x="907" y="200" width="22" height="22" class="module-icon"/>
+    <text x="947" y="221" class="heading">Daz Studio 6</text>
+
+    <path d="M1023.5 330v38" class="internal"/>
+    <path d="M1023.5 425v26" class="internal"/>
+    <path d="M1023.5 538v24" class="internal"/>
+
+    <rect x="900" y="247" width="247" height="83" rx="11" fill="#272440" stroke="#605985" stroke-width="1.2"/>
+    <use href="#icon-plug" x="915" y="261" width="22" height="22" class="module-icon"/>
+    <text x="947" y="280" class="label">Plugin puente</text>
+    <text x="915" y="310" font-size="17.5" class="mono secondary">(dsp_dazmcp_bridge.dll)</text>
+
+    <rect x="900" y="370" width="247" height="55" rx="10" class="card"/>
+    <use href="#icon-terminal" x="916" y="387" width="21" height="21" class="module-icon"/>
+    <text x="947" y="405" class="label">Script DAZ</text>
+
+    <rect x="900" y="453" width="247" height="85" rx="10" class="card"/>
+    <use href="#icon-cube" x="916" y="464" width="21" height="21" class="module-icon"/>
+    <text x="947" y="482" class="label">Escena:</text>
+    <text x="916" y="507" class="small secondary">figuras, ropa, accesorios, <tspan x="916" y="530">luces y cámaras</tspan></text>
+
+    <rect x="900" y="564" width="247" height="55" rx="10" class="card"/>
+    <use href="#icon-aperture" x="916" y="581" width="21" height="21" class="module-icon"/>
+    <text x="947" y="599" class="label" style="font-size: 19px">Motor de render Iray</text>
+  </g>
+
+  <g id="gpu">
+    <rect x="880" y="684" width="287" height="106" rx="21" class="panel"/>
+    <rect x="900" y="713" width="48" height="48" rx="12" class="icon-tile"/>
+    <use href="#icon-gpu" x="910" y="723" width="28" height="28" class="icon"/>
+    <text x="962" y="735" class="heading">GPU NVIDIA</text>
+    <text x="962" y="762" class="small secondary">Iray + filtro de ruido</text>
+  </g>
+
+  <g id="outputs">
+    <rect x="1238" y="245" width="306" height="545" rx="21" class="panel"/>
+    <rect x="1260" y="268" width="36" height="36" rx="9" class="icon-tile"/>
+    <use href="#icon-image" x="1267" y="275" width="22" height="22" class="icon"/>
+    <text x="1307" y="296" class="heading" style="font-size: 24px">Archivos de salida</text>
+
+    <g transform="translate(1260 315)" clip-path="url(#render-clip)">
+      <rect width="262" height="76" fill="#273853"/>
+      <circle cx="183" cy="27" r="13" fill="#ffcea3"/>
+      <path d="M0 56 38 37l20 10 45-34 53 39 45-23 61 25v22H0z" fill="#4b617f"/>
+      <path d="m81 30 22-17 24 18-21-4-12 6z" fill="#98a9c7"/>
+      <path d="m0 61 74-21 58 17 52-11 78 12v18H0z" fill="#344d65"/>
+      <path d="m0 67 48-13 48 9 47-6 56 8 63-5v16H0z" fill="#223a48"/>
+      <path d="M145 62h31m-19 6h25m22-12h21" stroke="#76a6a9" stroke-width="1.3" stroke-linecap="round" opacity=".75"/>
+    </g>
+    <rect x="1260" y="315" width="262" height="76" rx="9" fill="none" stroke="#4a5a72"/>
+    <text x="1260" y="420" class="label">Render PNG</text>
+    <path d="M1260 435h262" class="rule"/>
+
+    <g transform="translate(1260 452)" clip-path="url(#shot-clip)">
+      <rect width="82" height="62" fill="#303a57"/>
+      <path d="M0 48h82v14H0z" fill="#494866"/>
+      <rect x="46" y="7" width="28" height="29" rx="1" fill="#65809a"/>
+      <path d="M60 7v29M46 22h28" stroke="#374961" stroke-width="2"/>
+      <path d="M34 41h24m-21 0-2 17m20-17 2 17m7-13v-7m-2 0h4l-1-5h-2z" fill="none" stroke="#d7a884" stroke-width="2" stroke-linejoin="round"/>
+      <rect x="5" y="38" width="26" height="20" rx="5" fill="#111825"/>
+      <text x="18" y="53" text-anchor="middle" class="shot-number mono">01</text>
+    </g>
+    <g transform="translate(1350 452)" clip-path="url(#shot-clip)">
+      <rect width="82" height="62" fill="#35445f"/>
+      <path d="M0 60 58 43l24 5v14H0z" fill="#4f4b68"/>
+      <path d="M45 0h29v28l-29 5z" fill="#6e8da1"/>
+      <path d="M58 0v31M45 16l29-2" stroke="#3d5169" stroke-width="2"/>
+      <path d="m27 36 18-6 24 8-17 7z" fill="#ce9f82"/>
+      <path d="M28 37v17m24-9v14m16-20v14" stroke="#a47569" stroke-width="2"/>
+      <path d="M49 36V24m-6 0h12l-3-8h-6z" fill="#ffd1a6" stroke="#ffd1a6" stroke-width="1.5" stroke-linejoin="round"/>
+      <rect x="5" y="38" width="26" height="20" rx="5" fill="#111825"/>
+      <text x="18" y="53" text-anchor="middle" class="shot-number mono">02</text>
+    </g>
+    <g transform="translate(1440 452)" clip-path="url(#shot-clip)">
+      <rect width="82" height="62" fill="#303a57"/>
+      <path d="M0 43 69 50l13-5v17H0z" fill="#484961"/>
+      <path d="M7 0h30v30L7 26z" fill="#6e8da1"/>
+      <path d="M22 0v28M7 13l30 2" stroke="#3d5169" stroke-width="2"/>
+      <path d="m31 38 20-7 25 8-20 7z" fill="#ce9f82"/>
+      <path d="M32 38v17m24-9v14m19-20v13" stroke="#a47569" stroke-width="2"/>
+      <path d="M55 38V24m-7 0h14l-3-10h-8z" fill="#ffd1a6" stroke="#ffd1a6" stroke-width="1.5" stroke-linejoin="round"/>
+      <rect x="5" y="38" width="26" height="20" rx="5" fill="#111825"/>
+      <text x="18" y="53" text-anchor="middle" class="shot-number mono">03</text>
+    </g>
+    <g fill="none" stroke="#4a5a72">
+      <rect x="1260" y="452" width="82" height="62" rx="8"/>
+      <rect x="1350" y="452" width="82" height="62" rx="8"/>
+      <rect x="1440" y="452" width="82" height="62" rx="8"/>
+    </g>
+    <text x="1260" y="543" class="label" style="font-size: 19px">Planos de diálogo</text>
+    <text x="1522" y="543" text-anchor="end" font-size="17" class="mono secondary">shots.json</text>
+    <path d="M1260 558h262" class="rule"/>
+
+    <g transform="translate(1260 575)">
+      <rect width="262" height="64" rx="9" fill="#25253a" stroke="#4a5a72"/>
+      <rect x="8" y="5" width="246" height="4" fill="url(#film-perforations)"/>
+      <rect x="8" y="56" width="246" height="4" fill="url(#film-perforations)"/>
+      <path d="M7 12h80v40H7zm84 0h80v40H91zm84 0h80v40h-80z" fill="#36364f"/>
+      <path d="M16 46h62m22 0h62m22 0h62" stroke="#6c6685" stroke-width="1"/>
+      <path d="M25 39q20-29 43 0m41 0q20-29 43 0m41 0q20-29 43 0" fill="none" stroke="#a2a0bf" stroke-width="1.15" stroke-dasharray="2 3" opacity=".8"/>
+      <circle cx="27" cy="36" r="6" fill="#f3baaa"/>
+      <circle cx="130" cy="25" r="6" fill="#f3baaa"/>
+      <circle cx="233" cy="36" r="6" fill="#f3baaa"/>
+    </g>
+    <text x="1260" y="668" class="label">Animación MP4/GIF</text>
+    <path d="M1260 685h262" class="rule"/>
+    <text x="1260" y="714" class="small secondary">Listo para juegos y <tspan x="1260" y="738">novelas visuales </tspan><tspan x="1260" y="762">(p. ej., Ren'Py)</tspan></text>
+  </g>
+
+  <g id="connections">
+    <path d="M275 282H388M714 282H898M1023.5 620v62M1168 737h68" class="glow"/>
+    <path d="M275 282H388" class="flow"/>
+    <text x="332" y="263" text-anchor="middle" class="protocol">MCP (stdio)</text>
+    <path d="M714 282H898" class="flow"/>
+    <text x="797" y="239" text-anchor="middle" class="protocol">TCP <tspan x="797" y="263" class="mono" font-weight="400" letter-spacing="-.15">127.0.0.1:18640</tspan></text>
+    <path d="M714 398H898" class="fallback"/>
+    <text x="797" y="354" text-anchor="middle" class="fallback-label">Alternativa: <tspan x="797" y="378">modo sin plugin</tspan></text>
+    <path d="M1023.5 620v62" class="flow"/>
+    <path d="M1168 737h68" class="flow"/>
+  </g>
+
+  <g id="footer">
+    <path d="M56 830H1544" class="rule"/>
+    <use href="#icon-monitor" x="56" y="848" width="23" height="23" style="color: #aabad1"/>
+    <text x="91" y="867" class="small secondary">Windows 10/11 · GPU NVIDIA · Daz Studio 6</text>
+  </g>
+</svg>

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/MictlanLabs/Daz3D-MCP/main/docs/images/logo.svg" alt="Daz3D-MCP logo" width="460">
+</p>
+
 # Daz3D-MCP
 
 Permite que agentes de IA (Claude Code, Codex, Cursor, Antigravity, Gemini CLI,
@@ -14,6 +18,41 @@ ejecutar DazScript.
 > **Proyecto nuevo.** Está probado en Daz Studio 6.26 con Windows 11 y una
 > tarjeta NVIDIA, pero puede tener detalles por pulir. Reporta los problemas en
 > [Issues](https://github.com/MictlanLabs/Daz3D-MCP/issues).
+
+## Ejemplos
+
+Todas estas imágenes las renderizó en Daz Studio un agente de IA con estas herramientas.
+
+### Caras y expresiones
+
+`face_expression` pone expresiones con nombre en figuras Genesis 9 y 8.1;
+`eyes_look_at` y `eye_color` se encargan de los ojos.
+
+![El mismo personaje Genesis 9 con face_expression big_smile, surprised y angry](https://raw.githubusercontent.com/MictlanLabs/Daz3D-MCP/main/docs/images/face-expressions.jpg)
+
+### Iluminación
+
+`light_create` y `environment_set` arman desde una iluminación de estudio suave
+hasta un retrato oscuro con luces de neón.
+
+![Un retrato de estudio con luz principal, de relleno y de pelo junto a un retrato oscuro con luz principal cálida y contraluces cian y magenta](https://raw.githubusercontent.com/MictlanLabs/Daz3D-MCP/main/docs/images/lighting-comparison.jpg)
+
+### Escenas de diálogo
+
+`camera_shot` encuadra primeros planos, planos sobre el hombro y planos a dos
+respetando la regla de 180 grados, y `render_shots` renderiza una conversación
+entera, una imagen por línea, para novelas visuales, cómics y storyboards.
+
+![Cinco planos de una conversación entre dos personajes en un saloon del oeste: plano a dos, sobre el hombro, primer plano, primerísimo primer plano y plano de reacción](https://raw.githubusercontent.com/MictlanLabs/Daz3D-MCP/main/docs/images/dialogue-shots.jpg)
+
+### Animación
+
+`anim_keys_set`, los presets de animación y la importación de FBX de Mixamo o
+BVH animan figuras; `render_animation` renderiza cada fotograma a un MP4 o GIF.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/MictlanLabs/Daz3D-MCP/main/docs/images/waving-animation.gif" alt="Un personaje Genesis 9 saludando con la mano, renderizado con render_animation" width="480">
+</p>
 
 ## Requisitos
 
@@ -145,9 +184,7 @@ configuración, el token y el índice de contenido.
 
 ## Cómo funciona
 
-```
-Agente ──MCP (stdio)──> daz3d-mcp (Python) ──HTTP 127.0.0.1 + token──> plugin puente ──> DazScript en Daz Studio
-```
+![Arquitectura: los agentes de IA hablan MCP por stdio con el servidor daz3d-mcp en Python, que envía DazScript al plugin puente dentro de Daz Studio; Iray renderiza en la GPU NVIDIA](https://raw.githubusercontent.com/MictlanLabs/Daz3D-MCP/main/docs/images/architecture-diagram-es.svg)
 
 - **Plugin puente** (`bridge/`, C++): un servidor mínimo dentro de Daz Studio.
   Solo escucha en `127.0.0.1`, exige un token y ejecuta DazScript en el hilo
