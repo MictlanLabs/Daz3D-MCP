@@ -9,33 +9,137 @@ figuras (keyframes, presets, FBX de Mixamo y BVH de captura de movimiento) y
 ejecutar DazScript.
 
 > Proyecto open source independiente. No está afiliado ni respaldado por Daz 3D.
-> [Read in English](README.md)
+> [Read in English](https://github.com/MictlanLabs/Daz3D-MCP/blob/main/README.md)
 
-> **Fase temprana, en pruebas internas.** Versión 0.4. Todas las funciones de
-> abajo existen y pasan las pruebas contra un Daz Studio simulado, y se están
-> probando en un Daz Studio 6.26 real en Windows 11 con tarjetas gráficas AMD y
-> NVIDIA. Espera errores y cambios incompatibles, y no lo uses todavía para
-> trabajo de producción.
+> **Proyecto nuevo.** Está probado en Daz Studio 6.26 con Windows 11 y una
+> tarjeta NVIDIA, pero puede tener detalles por pulir. Reporta los problemas en
+> [Issues](https://github.com/MictlanLabs/Daz3D-MCP/issues).
 
-## Requisitos y limitaciones conocidas
+## Requisitos
 
-- **Hace falta una GPU NVIDIA para sacarle todo el provecho.** Daz Studio está
-  hecho alrededor de NVIDIA Iray, que solo renderiza con tarjetas NVIDIA (y solo
-  si la escena cabe en la memoria de la tarjeta). Con una GPU AMD o Intel, Iray
-  renderiza con la CPU: mucho más lento, sin el denoiser con IA de Iray y con
-  grano salvo que esperes mucho (en nuestras pruebas una escena de interior
-  llegó a unas 310 de las 1,000 a 2,000 iteraciones que necesita en 25 minutos).
-  Una escena grande también puede quedarse sin memoria y congelar Daz Studio.
-  Esto afecta a `render`, `render_shots` y `render_animation`; todo lo demás
-  funciona con cualquier tarjeta gráfica.
-- **Solo Windows.** Por ahora no habrá versión para macOS: Daz Studio está
-  hecho principalmente para GPUs NVIDIA, y las Mac no pueden usarlas, así que
-  ahí Iray renderiza con la CPU.
-- **Aún no hay versión publicada.** No está en PyPI ni hay un release en GitHub
-  con el plugin compilado, así que `setup` no puede descargarlo: compílalo
-  ([bridge/README.md](bridge/README.md)) y pasa `--plugin-file`, o usa
-  `--no-plugin`.
-- Daz Studio 4.24 aún no está soportado.
+- **Windows 10 u 11 de 64 bits.** No hay versión para macOS ni está planeada:
+  Daz Studio renderiza con NVIDIA Iray, y las Mac no pueden usar tarjetas NVIDIA.
+- **Una tarjeta gráfica NVIDIA** (se recomienda RTX). Iray solo renderiza con
+  GPUs NVIDIA, y solo si la escena cabe en la memoria de la tarjeta. Con
+  gráficos AMD o Intel, Iray usa la CPU: es muy lento, no tiene el denoiser con
+  IA, y las escenas grandes pueden quedarse sin memoria y congelar Daz Studio.
+  Solo `render`, `render_shots` y `render_animation` necesitan la GPU; todo lo
+  demás funciona con cualquier tarjeta.
+- **[Daz Studio 6](https://www.daz3d.com/get_studio)** (gratis), instalado en su
+  carpeta predeterminada. Daz Studio 4.24 aún no está soportado.
+- **[uv](https://docs.astral.sh/uv/getting-started/installation/)**, que ejecuta
+  el servidor MCP e instala Python si hace falta. En PowerShell:
+
+  ```powershell
+  powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+  ```
+
+  Después abre una terminal nueva para que `uvx` esté en el PATH.
+- Un cliente MCP: Claude Code, Claude Desktop, Codex, Cursor, Gemini CLI,
+  Antigravity, Windsurf, VS Code (Copilot) o cualquier otro.
+
+## Instalación
+
+**1. Cierra Daz Studio** e instálale el plugin puente:
+
+```powershell
+uvx daz3d-mcp setup
+```
+
+Encuentra Daz Studio, descarga el plugin de esta versión desde el
+[release de GitHub](https://github.com/MictlanLabs/Daz3D-MCP/releases) y lo
+copia a `C:\Program Files\DAZ 3D\DAZStudio6\plugins\`. Esa carpeta está
+protegida, así que Windows pide permiso de administrador una vez (acéptalo).
+
+**2. Registra el servidor MCP y las skills en tus agentes:**
+
+```powershell
+uvx daz3d-mcp install --all
+```
+
+Configura todos los agentes compatibles que encuentre en esta computadora y
+copia las skills (guías que enseñan al agente a usar Daz) a los agentes que
+las leen. Para un solo agente usa `--client NOMBRE` (`claude-code`, `codex`,
+`cursor`, `antigravity`, `gemini-cli`, `claude-desktop`, `windsurf`, `vscode`).
+
+**3. Abre Daz Studio, reinicia tus agentes y comprueba:**
+
+```powershell
+uvx daz3d-mcp doctor
+```
+
+Te dice qué falta y cómo arreglarlo. Luego pídele a tu agente algo como
+*"Describe la escena abierta en Daz y muéstrame una captura."*
+
+### Agregarlo a mano
+
+`install` lo hace por ti; usa esto para clientes que `install` no conoce.
+Todos los clientes ejecutan el mismo comando, `uvx daz3d-mcp`:
+
+- **Claude Code:**
+
+  ```powershell
+  claude mcp add --scope user daz3d -- uvx daz3d-mcp
+  ```
+
+- **Codex** (`~/.codex/config.toml`):
+
+  ```toml
+  [mcp_servers.daz3d]
+  command = "uvx"
+  args = ["daz3d-mcp"]
+  startup_timeout_sec = 60
+  tool_timeout_sec = 600
+  ```
+
+- **Claude Desktop, Cursor, Windsurf, Gemini CLI, Antigravity** y la mayoría de
+  los clientes (`mcpServers` en su configuración JSON):
+
+  ```json
+  { "mcpServers": { "daz3d": { "command": "uvx", "args": ["daz3d-mcp"] } } }
+  ```
+
+- **VS Code** (`mcp.json`): la misma entrada dentro de `"servers"`, con
+  `"type": "stdio"`.
+
+Los clientes sin soporte de skills reciben las mismas guías por el propio MCP
+(la herramienta `daz_guide`, prompts y resources).
+
+### Actualizar
+
+uvx conserva la versión que descargó. Para pasar a la más reciente, cierra Daz
+Studio y tus agentes, y luego:
+
+```powershell
+uv cache clean daz3d-mcp
+uvx daz3d-mcp setup
+```
+
+`setup` instala el plugin que corresponde a la nueva versión.
+
+### Desinstalar
+
+```powershell
+uvx daz3d-mcp uninstall
+```
+
+quita las entradas del MCP y las skills que agregó. Borra
+`C:\Program Files\DAZ 3D\DAZStudio6\plugins\dsp_dazmcp_bridge.dll` (con Daz
+Studio cerrado) para quitar el plugin, y `%USERPROFILE%\.daz3d-mcp` para la
+configuración, el token y el índice de contenido.
+
+### Solución de problemas
+
+- **`uvx` no se reconoce:** abre una terminal nueva después de instalar uv.
+- **`setup` dice que Daz Studio está abierto:** ciérralo; Windows no deja
+  reemplazar un plugin que está en uso.
+- **Se rechazó el permiso de administrador:** vuelve a ejecutar
+  `uvx daz3d-mcp setup`, o hazlo desde una terminal abierta como Administrador.
+- **El agente no ve las herramientas:** reinicia el agente después de
+  `install` y ejecuta `uvx daz3d-mcp doctor`.
+- **Sin plugin:** `uvx daz3d-mcp setup --no-plugin` usa un modo experimental
+  que le pide al Daz Studio abierto que ejecute archivos de script. Es más lento
+  pero no instala nada en Daz.
 
 ## Cómo funciona
 
@@ -48,44 +152,7 @@ Agente ──MCP (stdio)──> daz3d-mcp (Python) ──HTTP 127.0.0.1 + token�
   principal.
 - **Biblioteca DazScript** (`scripts/`): un script por herramienta; hace el trabajo real.
 - **Servidor MCP** (`src/daz3d_mcp/`, Python): las herramientas que usa el agente.
-- **Skills** (`skills/`): guías `SKILL.md` que enseñan al agente a usar Daz. Los
-  agentes sin soporte de skills reciben el mismo texto por el MCP (herramienta
-  `daz_guide`, prompts y resources).
-
-## Instalación
-
-Necesitas [uv](https://docs.astral.sh/uv/getting-started/installation/) y
-Daz Studio 6 (el soporte de 4.24 llega después).
-
-```bash
-uvx daz3d-mcp setup           # copia el plugin puente a Daz Studio
-uvx daz3d-mcp install --all   # registra el MCP y las skills en los agentes instalados
-uvx daz3d-mcp doctor          # revisa todo y dice qué arreglar
-```
-
-Después reinicia Daz Studio y tus agentes.
-
-Hasta la primera versión en PyPI, usa los mismos comandos desde GitHub:
-
-```bash
-uvx --from git+https://github.com/MictlanLabs/Daz3D-MCP daz3d-mcp install --all
-```
-
-`install` configura los agentes para que ejecuten ese mismo código.
-
-**Un solo agente:** `uvx daz3d-mcp install --client cursor` (también
-`claude-code`, `codex`, `antigravity`, `gemini-cli`, `claude-desktop`,
-`windsurf`, `vscode`). `uvx daz3d-mcp uninstall` quita todo lo que agregó.
-
-**Otro cliente MCP:** agrega este servidor a su configuración:
-
-```json
-{ "mcpServers": { "daz3d": { "command": "uvx", "args": ["daz3d-mcp"] } } }
-```
-
-**¿Aún no tienes el plugin compilado?** `uvx daz3d-mcp setup --no-plugin` usa un
-modo experimental que le pide al Daz Studio abierto que ejecute archivos de
-script. Es más lento pero no necesita compilar nada.
+- **Skills** (`skills/`): guías `SKILL.md` que enseñan al agente a usar Daz.
 
 ## Herramientas
 
@@ -192,31 +259,50 @@ uv run --group dev pytest            # pruebas de Python y DazScript (Node.js ej
 npm install --prefix tests/fake_daz  # una vez, para revisar la sintaxis ES5
 ```
 
-Compilar el puente: ver [bridge/README.md](bridge/README.md).
-El protocolo del puente está en [docs/protocol.md](docs/protocol.md).
+Compilar el puente: ver [bridge/README.md](https://github.com/MictlanLabs/Daz3D-MCP/blob/main/bridge/README.md).
+El protocolo del puente está en [docs/protocol.md](https://github.com/MictlanLabs/Daz3D-MCP/blob/main/docs/protocol.md).
 
 ### Versiones
 
 La versión del paquete vive solo en `pyproject.toml`; `daz3d_mcp.__version__`
 (la que muestran `daz_status` y `daz3d-mcp --version`) se lee de ahí. Súbela
 con uv, que también actualiza `uv.lock`, y agrega la versión a
-[CHANGELOG.md](CHANGELOG.md) y a [CHANGELOG.es.md](CHANGELOG.es.md):
+[CHANGELOG.md](https://github.com/MictlanLabs/Daz3D-MCP/blob/main/CHANGELOG.md) y a [CHANGELOG.es.md](https://github.com/MictlanLabs/Daz3D-MCP/blob/main/CHANGELOG.es.md):
 
 ```bash
 uv version --bump patch   # 0.5.0 -> 0.5.1
 uv version --bump minor   # 0.5.0 -> 0.6.0
 ```
 
-Mientras la versión sea 0.x: **patch** para correcciones, **minor** para
-herramientas o skills nuevas y para cambios incompatibles. 1.0.0 es el primer
-lanzamiento público (PyPI y el plugin compilado en GitHub). `setup` descarga el
-plugin del release de GitHub `v<versión>`, así que un tag de release debe
-llevar los archivos del plugin.
+Desde la 1.0.0 las versiones siguen [Semantic Versioning](https://semver.org/lang/es/):
+**patch** para correcciones, **minor** para herramientas o skills nuevas,
+**major** para cambios incompatibles (una herramienta que se quita o se
+renombra, un argumento que cambia de significado).
 
 El plugin puente tiene su propia versión en `bridge/src/version.h`; súbela solo
 cuando cambie el plugin, y sube `DAZMCP_PROTOCOL_VERSION` (y `PROTOCOL_VERSION`
 en `src/daz3d_mcp/__init__.py`) solo cuando cambie el formato HTTP.
 
+### Publicar una versión
+
+`setup` descarga el plugin del release de GitHub `v<versión>` de la versión
+exacta del paquete, así que cada release necesita el plugin adjunto, aunque el
+plugin no haya cambiado. Publica el release de GitHub antes que PyPI, para que
+`setup` funcione en cuanto aparezca el paquete.
+
+1. Sube la versión y llena los dos changelogs; corre las pruebas.
+2. Compila el puente si cambió ([bridge/README.md](https://github.com/MictlanLabs/Daz3D-MCP/blob/main/bridge/README.md)).
+3. Haz commit, crea el tag y súbelo: `git tag v1.2.3` y `git push origin main v1.2.3`.
+4. Crea el release de GitHub `v1.2.3` desde ese tag, con la sección del
+   changelog como notas, y adjunta `build/bridge/Release/dsp_dazmcp_bridge.dll`
+   renombrado a `dazmcp_bridge-ds6-windows-x64.dll`.
+5. Construye y sube el paquete (con un token de API de PyPI, o `UV_PUBLISH_TOKEN`):
+
+   ```bash
+   uv build
+   uv publish
+   ```
+
 ## Licencia
 
-Apache 2.0. Ver [LICENSE](LICENSE). El SDK de Daz Studio no se incluye.
+Apache 2.0. Ver [LICENSE](https://github.com/MictlanLabs/Daz3D-MCP/blob/main/LICENSE). El SDK de Daz Studio no se incluye.

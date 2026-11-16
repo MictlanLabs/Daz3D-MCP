@@ -1,6 +1,6 @@
 [project]
 name = "daz3d-mcp"
-version = "0.6.0"
+version = "1.0.0"
 description = "MCP server and skills that let AI agents control Daz Studio"
 readme = "README.md"
 license = "Apache-2.0"
@@ -9,10 +9,14 @@ requires-python = ">=3.10"
 authors = [{ name = "Daz3D-MCP contributors" }]
 keywords = ["daz", "daz3d", "daz studio", "mcp", "ai", "agents", "3d"]
 classifiers = [
-  "Programming Language :: Python :: 3",
-  "Operating System :: MacOS",
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
   "Operating System :: Microsoft :: Windows",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
   "Topic :: Multimedia :: Graphics :: 3D Modeling",
+  "Topic :: Multimedia :: Graphics :: 3D Rendering",
 ]
 dependencies = [
   "mcp>=1.10,<2",
@@ -20,6 +24,8 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/MictlanLabs/Daz3D-MCP"
+Documentation = "https://github.com/MictlanLabs/Daz3D-MCP#readme"
+Changelog = "https://github.com/MictlanLabs/Daz3D-MCP/blob/main/CHANGELOG.md"
 Issues = "https://github.com/MictlanLabs/Daz3D-MCP/issues"
 
 [project.scripts]
@@ -43,7 +49,8 @@ packages = ["src/daz3d_mcp"]
 "animations" = "daz3d_mcp/_data/animations"
 
 [tool.hatch.build.targets.sdist]
-include = ["src", "scripts", "skills", "animations", "tests", "README.md", "LICENSE"]
+include = ["src", "scripts", "skills", "animations", "tests", "README.md", "README.es.md",
+           "CHANGELOG.md", "CHANGELOG.es.md", "LICENSE"]
 
 # uv/uvx reuse a cached build of a local checkout until one of these files changes. By default only
 # pyproject.toml counts, so `uvx --from <checkout>` kept serving old tools after code changes.

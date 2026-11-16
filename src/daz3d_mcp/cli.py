@@ -36,6 +36,60 @@ def _is_arm() -> bool:
     return platform.machine().lower() in {"arm64", "aarch64"}
 
 
+def _daz_running() -> bool:
+    """True when DAZStudio.exe is running (Windows)."""
+    import subprocess
+
+    try:
+        out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq DAZStudio.exe", "/NH"],
+                             capture_output=True, text=True, check=False, timeout=15,
+                             stdin=subprocess.DEVNULL).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return "dazstudio.exe" in out.lower()
+
+
+def _copy_elevated(source: Path, target: Path, verb: str = "runas") -> bool:
+    """Copies a file with administrator rights through a UAC prompt (Windows).
+
+    Runs `cmd /c copy` with ShellExecuteEx and the "runas" verb, which shows the
+    Windows permission prompt, and waits for it. No pipes are shared with the
+    elevated process, so nothing can hang on them.
+    """
+    import ctypes
+    import filecmp
+    from ctypes import wintypes
+
+    class ShellExecuteInfo(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", wintypes.DWORD), ("fMask", ctypes.c_ulong), ("hwnd", wintypes.HWND),
+            ("lpVerb", wintypes.LPCWSTR), ("lpFile", wintypes.LPCWSTR), ("lpParameters", wintypes.LPCWSTR),
+            ("lpDirectory", wintypes.LPCWSTR), ("nShow", ctypes.c_int), ("hInstApp", wintypes.HINSTANCE),
+            ("lpIDList", ctypes.c_void_p), ("lpClass", wintypes.LPCWSTR), ("hkeyClass", wintypes.HKEY),
+            ("dwHotKey", wintypes.DWORD), ("hIconOrMonitor", wintypes.HANDLE), ("hProcess", wintypes.HANDLE),
+        ]
+
+    see_mask_nocloseprocess, sw_hide = 0x40, 0
+    # Windows paths cannot contain double quotes, so quoting them is enough.
+    params = f'/d /c if not exist "{target.parent}" mkdir "{target.parent}" & copy /y "{source}" "{target}"'
+    info = ShellExecuteInfo(cbSize=ctypes.sizeof(ShellExecuteInfo), fMask=see_mask_nocloseprocess,
+                            lpVerb=verb, lpFile="cmd.exe", lpParameters=params, nShow=sw_hide)
+    shell32 = ctypes.windll.shell32
+    kernel32 = ctypes.windll.kernel32
+    shell32.ShellExecuteExW.argtypes = [ctypes.POINTER(ShellExecuteInfo)]
+    kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    if not shell32.ShellExecuteExW(ctypes.byref(info)):  # the prompt was refused, or it failed
+        return False
+    if info.hProcess:
+        kernel32.WaitForSingleObject(info.hProcess, 300_000)
+        kernel32.CloseHandle(info.hProcess)
+    try:
+        return target.is_file() and filecmp.cmp(source, target, shallow=False)
+    except OSError:
+        return False
+
+
 def cmd_setup(args: argparse.Namespace) -> int:
     from daz3d_mcp.settings import load_settings
 
@@ -79,6 +133,9 @@ def cmd_setup(args: argparse.Namespace) -> int:
         if install is None:
             _print("Pass --plugin-file with a compiled bridge when Daz Studio is not detected.")
             return 1
+        if install.major < 6:
+            _print("Only Daz Studio 6 has a prebuilt bridge plugin; Daz Studio 4.24 is not supported yet.")
+            return 1
         asset = _release_asset_name(install)
         url = f"{RELEASES}/v{__version__}/{asset}"
         source = cfg / "downloads" / asset
@@ -93,16 +150,27 @@ def cmd_setup(args: argparse.Namespace) -> int:
             _print("Or use no-plugin mode for now: daz3d-mcp setup --no-plugin")
             return 1
 
+    if sys.platform == "win32" and target.is_file() and _daz_running():
+        _print("Daz Studio is open and is using the bridge plugin. Close Daz Studio and run setup again.")
+        return 1
     try:
         target_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
     except PermissionError:
-        _print(f"No permission to write {target}.")
-        if sys.platform == "darwin":
-            _print(f'Run: sudo cp "{source}" "{target}"')
+        if sys.platform == "win32" and not args.no_elevate:
+            # Program Files needs administrator rights: ask Windows for them (UAC prompt).
+            _print(f"Writing {target} needs administrator rights; Windows will ask for permission.")
+            if not _copy_elevated(source, target):
+                _print("The plugin was not copied (permission refused or the copy failed).")
+                _print("Run the command again from a terminal opened as Administrator.")
+                return 1
         else:
-            _print("Run the command again from a terminal opened as Administrator.")
-        return 1
+            _print(f"No permission to write {target}.")
+            if sys.platform == "darwin":
+                _print(f'Run: sudo cp "{source}" "{target}"')
+            else:
+                _print("Run the command again from a terminal opened as Administrator.")
+            return 1
     _print(f"Installed the bridge plugin: {target}")
     _print("Restart Daz Studio, then run: daz3d-mcp doctor")
     return 0
@@ -260,6 +328,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--plugin-file", help="Use this compiled bridge (.dylib/.dll) instead of downloading it.")
     s.add_argument("--plugins-dir", help="Daz Studio plugins folder, if it is not detected.")
     s.add_argument("--no-plugin", action="store_true", help="Skip the plugin and use no-plugin mode.")
+    s.add_argument("--no-elevate", action="store_true",
+                   help="Do not ask Windows for administrator rights when the plugins folder is protected.")
 
     i = sub.add_parser("install", help="Register the MCP server and skills in your AI agents.")
     i.add_argument("--all", action="store_true", help="Every supported agent found on this computer.")

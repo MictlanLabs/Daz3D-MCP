@@ -12,6 +12,24 @@ noted below when it changes.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-16
+
+First public release: on PyPI (`uvx daz3d-mcp`) with the compiled bridge
+plugin on the GitHub release.
+
+### Changed
+
+- `setup` asks Windows for administrator rights (a UAC prompt) when the Daz
+  Studio plugins folder is protected, instead of failing. `--no-elevate` turns
+  this off.
+- `setup` stops with a clear message when Daz Studio is open and would keep
+  the old plugin locked, and when the Daz Studio found is 4.24, which has no
+  prebuilt plugin.
+- The README (English and Spanish) is written for a first install: requirements,
+  install, adding the server by hand to each client, updating, uninstalling and
+  troubleshooting. Its links work on PyPI.
+- The package says it runs on Windows only.
+
 ## [0.6.0] - 2026-11-16
 
 ### Added
@@ -158,7 +176,8 @@ noted below when it changes.
 - First MCP server, bridge plugin, scene tools, `setup`, `install` and `doctor`
   commands.
 
-[Unreleased]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/MictlanLabs/Daz3D-MCP/releases/tag/v1.0.0
 [0.6.0]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v0.4.0...v0.5.0
