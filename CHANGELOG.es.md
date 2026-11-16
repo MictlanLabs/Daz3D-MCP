@@ -13,6 +13,18 @@ que se anota abajo cuando cambia.
 
 ## [Sin publicar]
 
+## [1.1.0] - 2026-11-16
+
+### Agregado
+
+- Fichas de personaje para crear personajes únicos a partir de una descripción y reutilizarlos: `character_create` crea un personaje (figura base, cuerpo, estatura, cada detalle de la cara, piel, ojos, pelo, ropa) y lo guarda como ficha JSON editable más un preset de personaje de Daz (`.duf`); `character_load` lo pone en cualquier escena, o sobre una figura que ya esté en ella; `character_update` cambia solo lo que se pide (un rasgo, el pelo, una prenda) y deja lo demás; `character_list` lista los personajes guardados y el vocabulario de rasgos.
+- Unos 115 rasgos de -1 a 1 cubren la complexión (estatura, peso, músculo, edad, busto, panza, caderas, muslos, brazos, proporciones) y cada parte de la cara: forma de la cara y del cráneo, frente, sienes, cejas, ojos, párpados, pliegue epicántico, pestañas, iris, pupilas, nariz (puente, joroba, punta, fosas, septum, torcida), mejillas, hoyuelos, labios, filtrum, boca, mandíbula (ángulo, desviación, papada, doble mentón), barbilla, orejas (lóbulos, ángulo, puntiagudas), dientes (tamaño, largo, forma afilada, separación, chuecos, mordida, encías, colmillos, colmillos inferiores), arrugas y asimetría natural. Cada vez que se aplica una ficha, los rasgos se traducen a los diales instalados en la figura, así que una misma ficha sirve en Genesis 9, 8.1 y 8; los rasgos sin un dial instalado se reportan, y los sustitutos cercanos se marcan como aproximados. En Genesis 9, los diales de asimetría izquierdo y derecho en pareja dan forma a labios, inclinación de los ojos, párpados, mejillas, cejas y forma de la cara aun sin los paquetes de morphs.
+- Las fichas también guardan heterocromía (un iris por ojo), el color de lo blanco de los ojos, cejas y vello facial con sus propios colores (raíz y punta), colores de dientes, encías, uñas y labios, añadidos como cuernos o cola, y cualquier otro cambio de material; `dials` llega a la Boca y los Ojos de Genesis 9 con `mouth:` y `eyes:`.
+- `morph_generate` crea diales de forma nuevos para rasgos sin morph instalado (ancho de nariz, ancho de mandíbula, mandíbula marcada y peso en Genesis 9), a partir de la malla y los pesos de los huesos de la cara y el cuerpo de la figura. Los guarda como morphs en una biblioteca de contenido, así que las figuras nuevas los cargan, y los proyecta sobre lo que la figura lleva puesto (ropa, pelo, cejas, pestañas, ojos, boca), enlazados para que los sigan. Las fichas de personaje los encuentran por rasgo, y al cargar o actualizar un personaje la ropa nueva también los sigue.
+- `eye_color(sclera=...)` cambia el color de lo blanco de los ojos (rojo, negro, amarillo) sin tocar el iris.
+- Un skill `character-design`: cuándo preguntar y qué suponer, una lista ordenada de cada rasgo, una tabla de frases a rasgos para cuerpo, cara, ojos, nariz, boca, mandíbula, orejas y dientes, qué funciona solo con el contenido inicial, cómo hacer caras únicas con pocos diales y mantener distinto a un elenco, cómo revisar el resultado con renders, piel, ojos, pelo y rasgos de fantasía, y las diferencias entre Genesis 9, 8.1 y 8.
+- Ajuste `characters_dir` para dónde se guardan las fichas y los presets (por defecto `~/.daz3d-mcp/characters`).
+
 ## [1.0.3] - 2026-11-16
 
 ### Corregido

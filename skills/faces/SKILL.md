@@ -57,6 +57,9 @@ the names below were verified on a real Genesis 9 (Laura) and Genesis 8.1 Male.
 - `eyes="left"` / `"right"` colors one eye (heterochromia, Genesis 9 only).
   `remove=true` takes the tint off.
 - Genesis 8 / 8.1 has one "Irises" surface for both eyes; only `color` works.
+- `sclera="#b02020"` colors the whites (bloodshot, vampire; `#202020` demon
+  black; `#e8d8a0` jaundiced). It multiplies them and leaves the iris as it is;
+  `remove=true` takes the iris and sclera tints off.
 - Character eye presets: `content_search(query="eyes", kind="material",
   generation=...)`, e.g. "Laura G9 Eyes".
 

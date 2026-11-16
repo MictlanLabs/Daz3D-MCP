@@ -214,7 +214,10 @@ configuración, el token y el índice de contenido.
 | `morph_list` / `morph_set` | Busca y ajusta diales de forma y los controles de pose y cara de la figura |
 | `face_expression` | Expresiones con nombre (sonrisa, tristeza, enojo, sorpresa, guiño...) en Genesis 9 y 8.1, o diales de la cara por nombre |
 | `eyes_look_at` | Hace que los ojos (y parte de la cabeza) miren a una cámara, a otra figura o a un punto |
-| `eye_color` | Cambia solo el color del iris, lo blanco del ojo no se toca; los 16 iris de Genesis 9; un color por ojo |
+| `eye_color` | Color del iris (lo blanco del ojo no se toca), los 16 iris de Genesis 9, un color por ojo; `sclera` cambia el color de lo blanco |
+| `character_create` | Crea un personaje a partir de una descripción (cuerpo, estatura, cada detalle de la cara incluidos dientes, orejas y nariz, piel, ojos, pelo, cejas, vello facial, ropa, añadidos) y lo guarda como ficha de personaje editable (JSON) más un preset de personaje de Daz; los rasgos se traducen a los diales instalados en la generación de la figura y se reportan los que faltan |
+| `morph_generate` | Crea diales de forma nuevos para rasgos que el usuario no tiene instalados (ancho de nariz, mandíbula, peso en Genesis 9) a partir de la malla y los pesos de huesos de la figura, los guarda en una biblioteca de contenido y hace que la ropa, el pelo, las cejas y las pestañas los sigan |
+| `character_load` / `character_update` / `character_list` | Pone un personaje guardado en cualquier escena (Genesis 9, 8.1 u 8) / cambia solo lo que se pide / lista los personajes y el vocabulario de rasgos |
 | `pose_bones` / `pose_reset` | Rota huesos (avisa de los que topan con su límite) / vuelve a la pose por defecto |
 | `prop_surfaces` | Mide dónde se puede sentar, acostar o parar una figura sobre un mueble: altura, tamaño, hacia dónde mira un asiento |
 | `place_on` | Pone una figura ya posada sobre un asiento, cama o escalón: mirando al frente, contra el respaldo, la cadera sobre el cojín |
@@ -249,11 +252,14 @@ configuración, el token y el índice de contenido.
 | `run_script` | Ejecuta DazScript para todo lo demás (se puede desactivar) |
 | `daz_guide` | Devuelve las skills como texto para agentes sin soporte de skills |
 
-Skills: `daz-basics`, `scene-building`, `characters`, `faces`, `furniture-poses`, `dialogue-scenes`, `rendering`, `render-culling`, `cross-generation-clothing`, `third-party-assets`, `animation`.
+Skills: `daz-basics`, `scene-building`, `characters`, `faces`, `furniture-poses`, `character-design`, `dialogue-scenes`, `rendering`, `render-culling`, `cross-generation-clothing`, `third-party-assets`, `animation`.
 
 Pruébalo: *"Abre ~/Documents/escena.duf en Daz, describe la escena y muéstrame una captura."*
 O: *"Monta una escena con dos personajes Genesis 9, vestidos y posados,
 conversando, y renderízala."*
+O: *"Crea a Ana para mi novela visual: 1.65 m, labios carnosos, ojos verdes
+rasgados, pecas, separación entre los dientes de enfrente, pelo largo trenzado.
+Guárdala para usarla en todas las escenas."*
 O: *"Instala ~/Downloads/chaqueta.zip, viste a Ana con ella, luego importa
 ~/Downloads/capa.fbx y conviértela en ropa que la siga."*
 O: *"Haz que Ana camine cuatro pasos hacia la cámara y luego pon en Leo
@@ -281,6 +287,7 @@ Daz Studio.
 | `content_index_max_age_hours` | `24` | Cada cuánto se reconstruye el índice de contenido |
 | `install_library` | `~/Documents/DAZ 3D/Third Party Library` | Dónde instala `package_install` los paquetes |
 | `max_package_gb` | `20` | Paquete más grande (descomprimido) que acepta `package_install` |
+| `characters_dir` | `~/.daz3d-mcp/characters` | Dónde se guardan las fichas de personaje (`.json`) y sus presets de Daz (`.duf`) |
 | `dialog_rules` | `[]` | Respuestas a diálogos de Daz dadas de antemano, p. ej. `[{"match": "outside the limits", "button": "Turn Limits Off"}]` (plugin 0.2+) |
 | `rotation_convention` | medida | Cómo gira Daz los huesos; el primer `anim_import` la mide y la guarda en `~/.daz3d-mcp/animation.json` |
 

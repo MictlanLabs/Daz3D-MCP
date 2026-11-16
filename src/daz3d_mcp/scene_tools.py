@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import re
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any, Awaitable, Callable, Literal
 
@@ -88,14 +89,21 @@ def _maps_to_abs(properties: dict) -> dict:
     return out
 
 
+@dataclass(frozen=True)
+class ContentAccess:
+    forget: Callable[[], None]
+    load: Callable[[str, str | None], Awaitable[dict]]
+    relative: Callable[[str], Awaitable[str]]
+
+
 def _clean(**kwargs) -> dict:
     """Drops arguments the agent did not give, so the scripts keep their defaults."""
     return {k: v for k, v in kwargs.items() if v is not None}
 
 
 def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient],
-             culler: cull_tools.Culler | None = None) -> Callable[[], None]:
-    """Adds the tools; returns a function that forgets the cached libraries and index."""
+             culler: cull_tools.Culler | None = None) -> "ContentAccess":
+    """Adds the tools; returns access to the content index for other tool groups."""
     state: dict[str, Any] = {"libraries": None, "index": None, "wearables": []}
     culls = culler or cull_tools.Culler(call)
 
@@ -129,6 +137,26 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient],
             await anyio.to_thread.run_sync(lambda: idx.load(refresh))
             state["index"] = idx
         return state["index"]
+
+    async def load_content(path: str, target: str | None = None) -> dict:
+        idx = await index()
+        resolved = idx.resolve(path)
+        if resolved is None:
+            raise ToolError(f"Content file not found: {path}. Use content_search to find it.")
+        kind = await anyio.to_thread.run_sync(lambda: idx.kind_for(resolved))
+        return await call("content_load", _clean(path=resolved.as_posix(), kind=kind, target=target))
+
+    async def library_relative(path: str) -> str:
+        idx = await index()
+        resolved = idx.resolve(path)
+        if resolved is None:
+            raise ToolError(f"Content file not found: {path}. Use content_search to find it.")
+        for lib in idx.libraries:
+            try:
+                return resolved.relative_to(lib).as_posix()
+            except ValueError:
+                continue
+        return resolved.as_posix()
 
     # ------------------------------------------------------- content ----
     @mcp.tool(annotations=READ_ONLY)
@@ -182,12 +210,7 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient],
     ) -> dict:
         """Loads content into the scene: adds a figure or prop, dresses a figure (clothing, hair),
         applies a pose, character, shape or material preset to the target. Returns the new nodes."""
-        idx = await index()
-        resolved = idx.resolve(path)
-        if resolved is None:
-            raise ToolError(f"Content file not found: {path}. Use content_search to find it.")
-        kind = await anyio.to_thread.run_sync(lambda: idx.kind_for(resolved))
-        return await call("content_load", _clean(path=resolved.as_posix(), kind=kind, target=target))
+        return await load_content(path, target)
 
     # --------------------------------------------------------- nodes ----
     @mcp.tool(annotations=CHANGES_SCENE)
@@ -327,12 +350,15 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient],
         strength: Annotated[float, Field(ge=0, le=1, description="Opacity of the tint.")] = 0.85,
         eyes: Annotated[Literal["both", "left", "right"], Field(description="Genesis 9 can color each eye "
                                                                            "(heterochromia).")] = "both",
-        remove: Annotated[bool, Field(description="Take the tint off.")] = False,
+        remove: Annotated[bool, Field(description="Take the tint off (iris and sclera).")] = False,
+        sclera: Annotated[Color | None, Field(description="Color of the whites of the eyes (red, black, yellow "
+                                                          "for fantasy or ill characters); it multiplies "
+                                                          "them.")] = None,
     ) -> dict:
-        """Changes iris color only (not the whites): a color tint, and on Genesis 9 one of its 16
-        iris images. For a whole new eye look, eye material presets also work (content_search)."""
+        """Changes iris color (a tint, and on Genesis 9 one of its 16 iris images) and, with sclera, the
+        color of the whites. For a whole new eye look, eye material presets also work (content_search)."""
         return await call("eye_color", _clean(figure=figure, color=color, iris=iris, keep_iris=keep_iris or None,
-                                              strength=strength, eyes=eyes, remove=remove or None))
+                                              strength=strength, eyes=eyes, remove=remove or None, sclera=sclera))
 
     # ------------------------------------------------ figures on props ----
     @mcp.tool(annotations=READ_ONLY)
@@ -1102,4 +1128,4 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient],
         content.append(json.dumps(result, ensure_ascii=False))
         return content
 
-    return forget
+    return ContentAccess(forget, load_content, library_relative)

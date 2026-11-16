@@ -22,6 +22,14 @@ Read `daz-basics` and `scene-building` first.
 Content only fits the generation it was made for. Always check
 `figure_info(figure).generation` and search with that `generation`.
 
+## Characters to keep and reuse
+
+When the user describes a character (for a visual novel, a comic, a story) or
+wants to use the same character in several scenes, follow `character-design`:
+`character_create` builds it from traits and saves a character sheet,
+`character_load` puts it in any scene and `character_update` changes it. The
+steps below are for one-off figures.
+
 ## Building one character
 
 ```text

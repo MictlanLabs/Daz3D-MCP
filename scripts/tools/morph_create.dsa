@@ -1,0 +1,66 @@
+function findMorph(obj, name) {
+	var i, mod;
+	for (i = 0; i < obj.getNumModifiers(); i++) {
+		mod = obj.getModifier(i);
+		if (DazMcp.inherits(mod, "DzMorph") && String(mod.getName()) === name) { return mod; }
+	}
+	return null;
+}
+
+function wornBy(master, label) {
+	var items = DazMcp.followers(master);
+	var i;
+	for (i = 0; i < items.length; i++) {
+		if (String(items[i].getLabel()) === label) { return items[i]; }
+	}
+	return null;
+}
+
+function dazmcpTool(args) {
+	var fig = args.master ? wornBy(DazMcp.requireNode(args.master, "master"), String(args.figure)) : null;
+	if (!fig) { fig = DazMcp.requireFigure(args.figure); }
+	var obj = fig.getObject();
+	var name = String(args.name || "");
+	if (!/^[A-Za-z0-9_]+$/.test(name)) { throw DazMcp.fail("bad_args", "name: letters, digits and _ only."); }
+	var file = new DzFile(args.deltas);
+	if (!file.open(DzFile.ReadOnly)) { throw DazMcp.fail("not_found", "Cannot read " + args.deltas); }
+	var flat = DazMcp.fromJson(String(file.read()));
+	file.close();
+	var morph = findMorph(obj, name);
+	var replaced = !!morph;
+	var keep = 0;
+	if (morph) {
+		keep = morph.getValueControl().getValue();
+		obj.removeModifier(morph);
+	}
+	morph = new DzMorph();
+	morph.setName(name);
+	morph.setLabel(args.label || name);
+	var deltas = morph.getDeltas();
+	var n = obj.getCurrentShape().getGeometry().getNumVertices();
+	try { deltas.setVertCount(n); } catch (e) { DazMcp.log("setVertCount: " + e); }
+	var i, count = 0;
+	for (i = 0; i + 3 < flat.length; i += 4) {
+		deltas.addDelta(flat[i], new DzVec3(flat[i + 1], flat[i + 2], flat[i + 3]));
+		count++;
+	}
+	obj.addModifier(morph);
+	var vc = morph.getValueControl();
+	vc.setLabel(args.label || name);
+	try { vc.setPath(args.group || "/Actor/Daz3D-MCP"); } catch (e2) { DazMcp.log("setPath: " + e2); }
+	try { vc.setIsClamped(true); } catch (e3) { DazMcp.log("setIsClamped: " + e3); }
+	try { vc.setMinMax(args.min !== undefined ? args.min : -1, args.max !== undefined ? args.max : 1); } catch (e4) { DazMcp.log("setMinMax: " + e4); }
+	var follows = null;
+	if (args.master) {
+		var master = DazMcp.requireNode(args.master, "master");
+		var lead = findMorph(master.getObject(), name);
+		if (!lead) { throw DazMcp.fail("not_found", args.master + " has no morph " + name + "."); }
+		try { vc.setHidden(true); } catch (e5) { DazMcp.log("setHidden: " + e5); }
+		vc.insertController(new DzERCLink(DzERCLink.ERCDeltaAdd, lead.getValueControl(), 1.0, 0.0));
+		follows = master.getLabel();
+	} else {
+		vc.setValue(typeof args.value === "number" ? args.value : keep);
+	}
+	return { figure: fig.getLabel(), morph: name, label: vc.getLabel(), deltas: count, replaced: replaced,
+		value: DazMcp.round(vc.getValue(), 4), min: vc.getMin(), max: vc.getMax(), follows: follows };
+}

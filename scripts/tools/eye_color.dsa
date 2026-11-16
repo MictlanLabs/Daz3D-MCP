@@ -16,9 +16,11 @@
 //   strength  (number 0..1, default 0.85) opacity of the tint
 //   eyes      ("both" | "left" | "right", default "both")
 //   remove    (bool, default false) take the tint off (and keep the iris)
+//   sclera    ([r, g, b] 0..1 or "#rrggbb") color of the whites of the eyes (multiplies them)
 
 var SPLIT = "Runtime/Textures/DAZ/Characters/Genesis9/Base/Eyes/Split/";
 var TINT = "Iris Tint";
+var SCLERA_TINT = "Sclera Tint";
 
 function pad2(n) { return n < 10 ? "0" + n : String(n); }
 
@@ -69,9 +71,12 @@ function dazmcpTool(args) {
 	var strength = typeof args.strength === "number" ? Math.max(0, Math.min(1, args.strength)) : 0.85;
 	var color = args.color !== undefined && args.color !== null ? DazMcp.toColor(args.color) : null;
 	var iris = typeof args.iris === "number" ? Math.round(args.iris) : null;
-	if (!color && iris === null && args.remove !== true) {
-		throw DazMcp.fail("bad_args", "Give a color, an iris number (1-16), or remove=true.");
+	var sclera = args.sclera !== undefined && args.sclera !== null ? DazMcp.toColor(args.sclera) : null;
+	if (!color && iris === null && !sclera && args.remove !== true) {
+		throw DazMcp.fail("bad_args", "Give a color, an iris number (1-16), a sclera color, or remove=true.");
 	}
+	var touchIris = !!color || iris !== null || args.remove === true;
+	var touchSclera = !!sclera || args.remove === true;
 	var where = irisSurfaces(fig, which);
 	if (where.kind === "g8" && iris !== null) {
 		throw DazMcp.fail("bad_args", "Iris images 1-16 are for Genesis 9. On Genesis 8 use color, or an eye material preset.");
@@ -112,9 +117,28 @@ function dazmcpTool(args) {
 			}
 		}
 		tex.beginEditing();
-		idx = layerIndex(tex, TINT);
-		while (idx >= 0) { tex.removeLayer(idx); idx = layerIndex(tex, TINT); }
+		if (touchIris) {
+			idx = layerIndex(tex, TINT);
+			while (idx >= 0) { tex.removeLayer(idx); idx = layerIndex(tex, TINT); }
+		}
 		info = { surface: m.getLabel() };
+		if (where.kind === "g9" && touchSclera) {
+			idx = layerIndex(tex, SCLERA_TINT);
+			while (idx >= 0) { tex.removeLayer(idx); idx = layerIndex(tex, SCLERA_TINT); }
+			var si = layerIndex(tex, "Sclera");
+			if (sclera && args.remove !== true && si >= 0) {
+				layer = tex.createLayer(SCLERA_TINT);
+				layer.color = sclera;
+				layer.blendMode = layer.BlendModeMultiply;
+				layer.opacity = 1;
+				mask = layer.createMask("Sclera Mask");
+				mask.imageFile = tex.getLayer(si).imageFile;
+				tex.moveLayer(tex.getNumLayers() - 1, si + 1);
+				info.sclera = DazMcp.colorToArray(sclera);
+			} else if (sclera && si < 0) {
+				info.sclera_missing = "no Sclera layer on this eye";
+			}
+		}
 		li = layerIndex(tex, "Iris");
 		if (where.kind === "g9" && li < 0) {
 			tex.endEditing();
@@ -122,7 +146,7 @@ function dazmcpTool(args) {
 		}
 		if (irisFile) { tex.getLayer(li).imageFile = irisFile; }
 		if (li >= 0) { info.iris = String(tex.getLayer(li).imageFile).split("/").pop(); }
-		if (color && args.remove !== true) {
+		if (touchIris && color && args.remove !== true) {
 			layer = tex.createLayer(TINT);
 			layer.color = color;
 			layer.blendMode = layer.BlendModeOverlay;
@@ -137,6 +161,21 @@ function dazmcpTool(args) {
 		tex.endEditing();
 		prop.setMap(tex);
 		out.changed.push(info);
+	}
+	if (where.kind === "g8" && touchSclera) {
+		var nodes = [fig].concat(DazMcp.followers(fig));
+		var k, sm, sp;
+		for (k = 0; k < nodes.length; k++) {
+			if (DazMcp.surfaceLabels(nodes[k]).indexOf("Sclera") < 0) { continue; }
+			sm = DazMcp.materialsOf(nodes[k], ["Sclera"]);
+			if (!sm.length) { continue; }
+			sp = DazMcp.findProp(sm[0], ["Base Color", "Diffuse Color"]);
+			if (sp) {
+				DazMcp.setPropValue(sp, sclera && args.remove !== true ? args.sclera : [1, 1, 1]);
+				out.changed.push({ surface: "Sclera", sclera: sclera && args.remove !== true ? DazMcp.colorToArray(sclera) : null });
+			}
+			break;
+		}
 	}
 	return out;
 }

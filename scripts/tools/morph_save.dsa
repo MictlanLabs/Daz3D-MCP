@@ -1,0 +1,30 @@
+function dazmcpTool(args) {
+	var fig = DazMcp.requireFigure(args.figure);
+	var library = String(args.library || "");
+	if (!library) { library = String(App.getContentMgr().getContentDirectoryPath(0)); }
+	if (!new DzDir(library).exists()) { throw DazMcp.fail("not_found", "Content library not found: " + library); }
+	var names = args.morphs || [];
+	if (!names.length) { throw DazMcp.fail("bad_args", "morphs: the morph names to save."); }
+	var mgr = App.getAssetIOMgr();
+	var index = mgr.findFilter("DzModifierSupportAssetFilter");
+	if (index < 0) { index = mgr.findFilter("DzMorphSupportAssetFilter"); }
+	var filter = mgr.getFilter(index);
+	var settings = new DzFileIOSettings();
+	filter.getDefaultOptions(settings);
+	settings.setStringValue("RootLabel", String(fig.getLabel()));
+	settings.setStringValue("BaseDataPath", library);
+	settings.setStringValue("VendorName", args.vendor || "Daz3D-MCP");
+	settings.setStringValue("ProductName", args.product || "Generated");
+	settings.setStringValue("ItemName", args.product || "Generated");
+	var nodes = settings.setSettingsValue("NodeNames");
+	var mine = nodes.setSettingsValue(String(fig.getName()));
+	var i;
+	for (i = 0; i < names.length; i++) { mine.setStringValue(String(i), String(names[i])); }
+	settings.setBoolValue("CompressOutput", false);
+	settings.setBoolValue("RunSilent", true);
+	var err = mgr.doSaveWithOptions(filter, settings, false, library + "/Daz3D-MCP morphs", library, "");
+	if (err !== undefined && err !== null && err !== 0) {
+		throw DazMcp.fail("save_failed", "Daz Studio could not save the morphs (" + getErrorMessage(err) + ").");
+	}
+	return { figure: fig.getLabel(), library: library, morphs: names, filter: filter.className() };
+}

@@ -1,0 +1,55 @@
+function wornBy(master, label) {
+	var items = DazMcp.followers(master);
+	var i;
+	for (i = 0; i < items.length; i++) {
+		if (String(items[i].getLabel()) === label) { return items[i]; }
+	}
+	return null;
+}
+
+function dazmcpTool(args) {
+	var fig = args.master ? wornBy(DazMcp.requireNode(args.master, "master"), String(args.figure)) : null;
+	if (!fig) { fig = DazMcp.requireFigure(args.figure); }
+	var obj = fig.getObject();
+	var mesh = obj.getCurrentShape().getGeometry();
+	var n = mesh.getNumVertices();
+	var parts = [];
+	var i, j, v, f, b, w, name, list;
+	var verts = [];
+	for (i = 0; i < n; i++) {
+		v = mesh.getVertex(i);
+		verts.push(DazMcp.round(v.x, 4) + "," + DazMcp.round(v.y, 4) + "," + DazMcp.round(v.z, 4));
+	}
+	var facets = [];
+	var nf = mesh.getNumFacets();
+	for (i = 0; i < nf; i++) {
+		f = mesh.getFacet(i);
+		facets.push(f.vertIdx1 + "," + f.vertIdx2 + "," + f.vertIdx3 + "," + f.vertIdx4);
+	}
+	var weights = [];
+	var sb = null;
+	try { sb = fig.getSkinBinding(); } catch (e) { sb = null; }
+	var nb = sb && args.weights !== false ? sb.getNumBoneBindings() : 0;
+	for (i = 0; i < nb; i++) {
+		b = sb.getBoneBinding(i);
+		name = String(b.getBone().getName());
+		w = b.getWeights();
+		if (!w) { continue; }
+		list = [];
+		for (j = 0; j < n; j++) {
+			var x = w.getFloatWeight(j);
+			if (x > 0.001) { list.push(j + "," + DazMcp.round(x, 4)); }
+		}
+		weights.push(DazMcp.toJson(name) + ":[" + list.join(",") + "]");
+	}
+	parts.push("{\"figure\":" + DazMcp.toJson(fig.getLabel()));
+	parts.push("\"generation\":" + DazMcp.toJson(DazMcp.generation(fig)));
+	parts.push("\"vertices\":[" + verts.join(",") + "]");
+	parts.push("\"facets\":[" + facets.join(",") + "]");
+	parts.push("\"weights\":{" + weights.join(",") + "}}");
+	var file = new DzFile(args.path);
+	if (!file.open(DzFile.WriteOnly)) { throw DazMcp.fail("save_failed", "Cannot write " + args.path); }
+	file.write(parts.join(","));
+	file.close();
+	return { path: args.path, vertices: n, facets: nf, bones: weights.length };
+}

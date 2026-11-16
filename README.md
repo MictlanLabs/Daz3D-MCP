@@ -212,7 +212,10 @@ settings, token and content index.
 | `morph_list` / `morph_set` | Finds and sets shape dials and the figure's pose and face controls |
 | `face_expression` | Named expressions (smile, sad, angry, surprised, wink...) on Genesis 9 and 8.1, or face dials by name |
 | `eyes_look_at` | Aims the eyes (and part of the head turn) at a camera, another figure or a point |
-| `eye_color` | Iris color only, the whites stay white; Genesis 9's 16 iris images; one color per eye |
+| `eye_color` | Iris color (the whites stay white), Genesis 9's 16 iris images, one color per eye; `sclera` colors the whites |
+| `character_create` | Builds a character from a description (body, height, every face detail including teeth, ears and nose, skin, eyes, hair, eyebrows, facial hair, clothes, add-ons) and saves it as an editable character sheet (JSON) plus a Daz character preset; traits are mapped to the dials installed on the figure's generation and missing ones are reported |
+| `morph_generate` | Makes new shape dials for traits the user has no morph for (nose width, jaw, weight on Genesis 9) from the figure's own mesh and bone weights, saves them in a content library and makes clothing, hair, brows and lashes follow them |
+| `character_load` / `character_update` / `character_list` | Puts a saved character in any scene (Genesis 9, 8.1 or 8) / changes only what is asked / lists characters and the trait vocabulary |
 | `pose_bones` / `pose_reset` | Rotates bones (reports dials held at joint limits) / back to the default pose |
 | `prop_surfaces` | Measures where a figure can sit, lie or stand on a prop: height, size, which way a seat faces |
 | `place_on` | Puts a posed figure on a seat, bed or step: faces it out, against the backrest, hips on the cushion |
@@ -247,11 +250,14 @@ settings, token and content index.
 | `run_script` | Runs DazScript for anything else (can be disabled) |
 | `daz_guide` | Returns the skills as text for agents without skills support |
 
-Skills: `daz-basics`, `scene-building`, `characters`, `faces`, `furniture-poses`, `dialogue-scenes`, `rendering`, `render-culling`, `cross-generation-clothing`, `third-party-assets`, `animation`.
+Skills: `daz-basics`, `scene-building`, `characters`, `faces`, `furniture-poses`, `character-design`, `dialogue-scenes`, `rendering`, `render-culling`, `cross-generation-clothing`, `third-party-assets`, `animation`.
 
 Try it: *"Open ~/Documents/scene.duf in Daz, describe the scene and show me a capture."*
 Or: *"Build a scene with two Genesis 9 characters, dressed and posed, talking
 to each other, and render it."*
+Or: *"Create Ana for my visual novel: 1.65 m, full lips, upturned green eyes,
+freckles, a gap between her front teeth, long braided hair. Save her so I can
+use her in every scene."*
 Or: *"Install ~/Downloads/jacket.zip, dress Ana with it, then import
 ~/Downloads/cape.fbx and make it clothing that follows her."*
 Or: *"Make Ana walk four steps toward the camera, then put
@@ -278,6 +284,7 @@ Content search runs in the MCP server on an index of the library files
 | `content_index_max_age_hours` | `24` | When to rebuild the content index |
 | `install_library` | `~/Documents/DAZ 3D/Third Party Library` | Where `package_install` puts packages |
 | `max_package_gb` | `20` | Largest package (unpacked) `package_install` accepts |
+| `characters_dir` | `~/.daz3d-mcp/characters` | Where character sheets (`.json`) and their Daz presets (`.duf`) are kept |
 | `dialog_rules` | `[]` | Answers to Daz dialogs given in advance, e.g. `[{"match": "outside the limits", "button": "Turn Limits Off"}]` (plugin 0.2+) |
 | `rotation_convention` | measured | How Daz turns bones; the first `anim_import` measures it and caches it in `~/.daz3d-mcp/animation.json` |
 

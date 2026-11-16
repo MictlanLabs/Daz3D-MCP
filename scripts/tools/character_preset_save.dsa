@@ -1,0 +1,26 @@
+function dazmcpTool(args) {
+	var fig = DazMcp.requireFigure(args.figure);
+	var path = String(args.path || "");
+	if (!path) { throw DazMcp.fail("bad_args", "path is required."); }
+	if (!/\.duf$/i.test(path)) { path = path + ".duf"; }
+	var dir = new DzFileInfo(path).path();
+	if (!new DzDir(dir).exists()) { new DzDir(dir).mkpath(dir); }
+	DazMcp.clearTarget(path, args.overwrite === true);
+	var mgr = App.getAssetIOMgr();
+	var index = mgr.findFilter("DzCharacterAssetFilter");
+	if (index < 0) { throw DazMcp.fail("not_supported", "This Daz Studio cannot save character presets."); }
+	var filter = mgr.getFilter(index);
+	var settings = new DzFileIOSettings();
+	filter.getDefaultOptions(settings);
+	settings.setBoolValue("RunSilent", true);
+	settings.setBoolValue("WriteShapes", true);
+	settings.setBoolValue("WriteMaterials", args.materials !== false);
+	DazMcp.selectOnly(fig);
+	Scene.setPrimarySelection(fig);
+	var err = mgr.doSaveWithOptions(filter, settings, false, path, "", "");
+	if (err !== undefined && err !== null && err !== 0 && !DazMcp.fileExists(path)) {
+		throw DazMcp.fail("save_failed", "Daz Studio could not save the character preset (" + getErrorMessage(err) + ").",
+			{ path: path, error_code: err });
+	}
+	return { saved: path, figure: fig.getLabel(), generation: DazMcp.generation(fig) };
+}

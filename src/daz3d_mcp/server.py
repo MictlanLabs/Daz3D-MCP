@@ -13,7 +13,7 @@ from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from daz3d_mcp import __version__, anim_tools, asset_tools, cull_tools, scene_tools
+from daz3d_mcp import __version__, anim_tools, asset_tools, character_tools, cull_tools, morph_tools, scene_tools
 from daz3d_mcp.client import DazClient
 from daz3d_mcp.paths import config_dir
 from daz3d_mcp.skills import get_skill, list_skills
@@ -33,6 +33,11 @@ place_on and fit_check put a posed figure on a chair, sofa or bed without
 floating or passing through it; face_expression, eyes_look_at and eye_color
 set expressions, where the eyes look and iris color; camera_create,
 light_create and environment_set set up the shot; render makes the final image.
+Characters to reuse: character_create turns a description into a character
+(body, every face detail, skin, eyes, hair, clothes) saved as an editable sheet;
+character_load puts it in any scene, character_update changes only what is
+asked, character_list lists them and the traits; morph_generate makes dials for
+traits with no installed morph (nose width, jaw, weight on Genesis 9).
 Dialogue scenes (visual novels): camera_shot frames a close-up, over the shoulder
 or two shot on a face, on one side of the line between the two speakers;
 render_shots renders a whole conversation, one image per line.
@@ -51,9 +56,9 @@ anim_import brings Mixamo FBX or mocap BVH onto a Genesis figure; anim_retime
 and anim_offset change speed, timing and place; anim_foot_contact and
 anim_preview check the result.
 If your client has no skills, read the guides with daz_guide first: daz-basics,
-then scene-building, characters, faces, furniture-poses, dialogue-scenes,
-rendering, render-culling, cross-generation-clothing, third-party-assets and
-animation.
+then scene-building, characters, character-design, faces, furniture-poses,
+dialogue-scenes, rendering, render-culling, cross-generation-clothing,
+third-party-assets and animation.
 run_script runs free DazScript (ES5 JavaScript) for anything the named tools
 do not cover; prefer the named tools when they exist.
 """
@@ -276,9 +281,11 @@ def create_server(client: DazClient | None = None) -> FastMCP:
             raise ToolError(f"No guide named {topic!r}. Call daz_guide without a topic to list them.")
         return skill.body
 
-    forget_index = scene_tools.register(mcp, call, get_client, culler)
-    asset_tools.register(mcp, call, get_client, forget_index)
+    content = scene_tools.register(mcp, call, get_client, culler)
+    asset_tools.register(mcp, call, get_client, content.forget)
     anim_tools.register(mcp, call, get_client)
+    morphs = morph_tools.register(mcp, call)
+    character_tools.register(mcp, call, get_client, content, morphs)
 
     for skill in list_skills():
         _register_skill(mcp, skill.name, skill.description)

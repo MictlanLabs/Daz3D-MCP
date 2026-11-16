@@ -43,6 +43,7 @@ class Settings:
     # "button": label to press, "check": [check box labels]}.
     # Example: [{"match": "outside the limits", "button": "Turn Limits Off"}]
     dialog_rules: list = field(default_factory=list)
+    characters_dir: str | None = None
     extra: dict = field(default_factory=dict)
 
     @property

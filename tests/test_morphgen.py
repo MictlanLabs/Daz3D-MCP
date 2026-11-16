@@ -1,0 +1,167 @@
+"""New shape dials made from a mesh and its bone weights, projected onto worn items, and the
+morph_generate tool against a stand-in for Daz."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import anyio
+import pytest
+from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
+
+from daz3d_mcp import character_tools, morph_tools
+from daz3d_mcp import characters as ch
+from daz3d_mcp import morphgen as mg
+
+
+def grid_mesh(n: int = 9) -> dict:
+    verts, facets, left, right = [], [], [], []
+    for j in range(n):
+        for i in range(n):
+            x = i - (n - 1) / 2
+            verts += [x, float(j), 0.0]
+            idx = j * n + i
+            if x < 0:
+                left += [idx, 1.0]
+            elif x > 0:
+                right += [idx, 1.0]
+    for j in range(n - 1):
+        for i in range(n - 1):
+            a = j * n + i
+            facets += [a, a + 1, a + n + 1, a + n]
+    return {"figure": "Test", "generation": "Genesis 9", "vertices": verts, "facets": facets,
+            "weights": {"l_nostril": left, "r_nostril": right}}
+
+
+@pytest.fixture
+def mesh(tmp_path) -> mg.Mesh:
+    path = tmp_path / "mesh.json"
+    path.write_text(json.dumps(grid_mesh()))
+    return mg.Mesh.load(path)
+
+
+def test_scale_is_symmetric(mesh):
+    recipe = mg.RECIPES["nose_width"]
+    deltas = mg.build_deltas(mesh, recipe)
+    assert deltas
+    for i, (dx, dy, dz) in deltas.items():
+        x = mesh.vertices[i][0]
+        mirror = next(k for k, v in enumerate(mesh.vertices) if v == (-x, mesh.vertices[i][1], 0.0))
+        assert deltas.get(mirror, (0.0, 0.0, 0.0))[0] == pytest.approx(-dx, abs=1e-4)
+        assert dy == pytest.approx(0) and dz == pytest.approx(0)
+        assert dx * x >= 0
+
+
+def test_inflate_follows_normals(mesh):
+    recipe = mg.Recipe("T", "T", "/T", "t", "", (mg.Op("inflate", {"l_nostril": 1.0, "r_nostril": 1.0},
+                                                       (1.0, 0.0, 0.0), smooth=0),), smooth=0)
+    deltas = mg.build_deltas(mesh, recipe)
+    for dx, dy, dz in deltas.values():
+        assert abs(dz) == pytest.approx(1.0, abs=1e-3) and dx == pytest.approx(0) and dy == pytest.approx(0)
+
+
+def test_projection_carries_deltas_to_nearby_items(mesh):
+    deltas = {i: (0.0, 0.0, 1.0) for i in range(len(mesh.vertices))}
+    item = [(0.0, 4.0, 0.2), (1.0, 2.0, 0.3), (100.0, 100.0, 100.0)]
+    out = mg.project(mesh.vertices, deltas, item)
+    assert out[0][2] == pytest.approx(1.0, rel=0.1) and out[1][2] > 0.9
+    assert 2 not in out
+
+
+def test_write_deltas_is_flat(tmp_path):
+    path = tmp_path / "d.json"
+    mg.write_deltas(path, {3: (0.1, 0.0, -0.2), 1: (0.0, 0.5, 0.0)})
+    assert json.loads(path.read_text()) == [1, 0.0, 0.5, 0.0, 3, 0.1, 0.0, -0.2]
+
+
+def test_generated_dials_are_found_by_traits():
+    figure = [{"label": "MCP Nose Width", "name": "DazMcp_NoseWidth", "group": "/Actor/Head/Face/Nose/Daz3D-MCP",
+               "min": -1, "max": 1},
+              {"label": "MCP Weight", "name": "DazMcp_Weight", "group": "/Actor/Full Body/Daz3D-MCP",
+               "min": -1, "max": 1}]
+    inv = ch.inventory_from({"figure": ("Bruno", figure)})
+    res = ch.resolve({"nose_width": 0.4, "weight": -0.3}, inv, "Genesis 9")
+    assert res.traits["nose_width"]["dials"] == {"Bruno": {"MCP Nose Width": 0.4}}
+    assert res.traits["weight"]["dials"] == {"Bruno": {"MCP Weight": -0.3}}
+    assert all(r.trait in ch.TRAITS for r in mg.RECIPES.values())
+
+
+class FakeDaz:
+    def __init__(self, tmp: Path):
+        self.tmp = tmp
+        self.calls: list[tuple[str, dict]] = []
+        self.morphs: dict[str, dict] = {}
+
+    async def call(self, tool: str, args: dict | None = None, timeout: float | None = None) -> dict:
+        args = dict(args or {})
+        self.calls.append((tool, args))
+        if tool == "figure_info":
+            if args["figure"] == "Bruno":
+                return {"generation": "Genesis 9", "wearing": [{"label": "Shirt"}]}
+            return {"generation": "Genesis 8.1 Female", "wearing": []}
+        if tool == "morph_mesh":
+            data = grid_mesh()
+            if args.get("weights") is False:
+                data["weights"] = {}
+            Path(args["path"]).write_text(json.dumps(data))
+            return {"vertices": len(data["vertices"]) // 3}
+        if tool == "morph_create":
+            flat = json.loads(Path(args["deltas"]).read_text())
+            self.morphs[f"{args['figure']}:{args['name']}"] = {"master": args.get("master"),
+                                                               "deltas": len(flat) // 4}
+            return {"deltas": len(flat) // 4, "value": 0}
+        if tool == "morph_save":
+            return {"library": "lib", "morphs": args["morphs"]}
+        if tool == "morph_list":
+            names = [k.split(":")[1] for k in self.morphs if k.startswith(args["node"] + ":")]
+            return {"morphs": [{"name": n} for n in names]}
+        raise AssertionError(tool)
+
+
+@pytest.fixture
+def tool(tmp_path, monkeypatch):
+    monkeypatch.setenv("DAZ3D_MCP_HOME", str(tmp_path / "home"))
+    daz = FakeDaz(tmp_path)
+    mcp = FastMCP("test")
+    morph_tools.register(mcp, daz.call)
+
+    def run(name, **args):
+        async def go():
+            return await mcp.call_tool(name, args)
+        res = anyio.run(go)
+        parts = res[0] if isinstance(res, tuple) else res
+        return json.loads(parts[0].text)
+    return daz, run
+
+
+def test_morph_generate_makes_saves_and_follows(tool):
+    daz, run = tool
+    listed = run("morph_generate", figure="Bruno")
+    assert {a["trait"] for a in listed["available"]} == set(mg.RECIPES)
+    out = run("morph_generate", figure="Bruno", traits=["nose_width", "weight"])
+    assert [m["dial"] for m in out["made"]] == ["MCP Nose Width", "MCP Weight"]
+    assert out["saved"]["morphs"] == ["DazMcp_NoseWidth", "DazMcp_Weight"]
+    assert daz.morphs["Shirt:DazMcp_NoseWidth"]["master"] == "Bruno"
+    assert "Shirt:DazMcp_Weight" not in daz.morphs
+    assert any(f["item"] == "Shirt" for f in out["followers"])
+    meshes = [a for t, a in daz.calls if t == "morph_mesh"]
+    assert meshes[0].get("weights") is not False and meshes[-1]["master"] == "Bruno"
+
+
+def test_morph_generate_refuses_other_generations_and_unknown_traits(tool):
+    _, run = tool
+    with pytest.raises(ToolError, match="Genesis 9"):
+        run("morph_generate", figure="Bea", traits=["weight"])
+    with pytest.raises(ToolError, match="No recipe"):
+        run("morph_generate", figure="Bruno", traits=["horns"])
+
+
+def test_character_tools_make_items_follow_generated_dials(tool):
+    daz, _ = tool
+    gen = morph_tools.Generator(daz.call)
+    daz.morphs["Bruno:DazMcp_Weight"] = {"master": None, "deltas": 1}
+    recipes = anyio.run(gen.in_use, "Bruno")
+    assert [r.trait for r in recipes] == ["weight"]
+    assert character_tools.FOLLOW_AFTER == {"shape", "hair", "clothing", "extras"}
