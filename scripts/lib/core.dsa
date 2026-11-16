@@ -697,11 +697,33 @@ DazMcp.morphList = function (node, opts) {
 // --------------------------------------------------------------- lights ----
 DazMcp.LIGHT_POWER = ["Luminous Flux (Lumen)", "Flux", "Luminous Flux", "Intensity"];
 
-DazMcp.lightApply = function (light, args) {
+// Iray reads a spot or point light's lumens only in Photometric Mode, which a
+// light made by script starts without (the Create menu turns it on): with it
+// off, Luminous Flux does nothing and the light keeps a fixed, weak output.
+DazMcp.photometric = function (light, res) {
+	var p = DazMcp.findProp(light, ["Photometric Mode"]);
+	// DzSpotLight is a kind of DzDistantLight: compare the class itself
+	if (!p || DazMcp.className(light) === "DzDistantLight") { return false; }
+	if (p.getValue()) { return false; }
+	if (DazMcp.propType(p) === "enum") { p.setValue(1); } else { DazMcp.setPropValue(p, true); }
+	res.set.push(DazMcp.propInfo(p));
+	return true;
+};
+
+//   opts.created: a new light, set up like one from Daz's Create menu
+DazMcp.lightApply = function (light, args, opts) {
 	var res = { set: [], not_found: [] };
-	var p, k;
+	var p, k, turnedOn = false;
+	opts = opts || {};
 	DazMcp.placeAndAim(light, args, false);
+	if (opts.created) {
+		turnedOn = DazMcp.photometric(light, res);
+		// a light with a shape (Light Geometry) would show as a glowing panel
+		p = DazMcp.findProp(light, ["Render Emitter"]);
+		if (p && turnedOn) { DazMcp.setPropValue(p, false); }
+	}
 	if (args.power !== undefined && args.power !== null) {
+		if (!opts.created) { turnedOn = DazMcp.photometric(light, res) || turnedOn; }
 		p = DazMcp.findProp(light, DazMcp.LIGHT_POWER);
 		if (p) { res.set.push(DazMcp.setPropValue(p, args.power)); } else { res.not_found.push("power"); }
 	}
@@ -723,6 +745,11 @@ DazMcp.lightApply = function (light, args) {
 	out.class = DazMcp.className(light);
 	out.set = res.set;
 	out.not_found = res.not_found;
+	p = DazMcp.findProp(light, ["Photometric Mode"]);
+	if (p) { out.photometric = !!p.getValue(); }
+	if (turnedOn && !opts.created && out.photometric) {
+		out.note = "Photometric Mode was off, so its lumens had no effect; it is on now.";
+	}
 	return out;
 };
 
@@ -751,6 +778,44 @@ DazMcp.findRenderProp = function (labels) {
 		if (p) { return p; }
 	}
 	return null;
+};
+
+// Iray exposure: the tone mapper renders with Shutter Speed (1/x), F/Stop and
+// Film ISO. Exposure Value is a convenience the Render Settings pane keeps in
+// step with them; set by script it changes nothing, so it is turned into a
+// shutter speed here (EV at ISO 100: 2^EV = N^2 * x * 100 / ISO).
+DazMcp.EXPOSURE = { ev: ["Exposure Value"], shutter: ["Shutter Speed (1/x)", "Shutter Speed"], f_stop: ["F/Stop"],
+	iso: ["Film ISO"] };
+
+DazMcp.exposureProps = function () {
+	var out = {}, key;
+	for (key in DazMcp.EXPOSURE) {
+		if (DazMcp.EXPOSURE.hasOwnProperty(key)) { out[key] = DazMcp.findRenderProp(DazMcp.EXPOSURE[key]); }
+	}
+	return out;
+};
+
+DazMcp.exposureInfo = function () {
+	var e = DazMcp.exposureProps();
+	if (!e.ev && !e.shutter) { return null; }
+	return { ev: e.ev ? DazMcp.round(e.ev.getValue(), 2) : null, shutter: e.shutter ? DazMcp.round(e.shutter.getValue(), 3) : null,
+		f_stop: e.f_stop ? DazMcp.round(e.f_stop.getValue(), 2) : null, iso: e.iso ? DazMcp.round(e.iso.getValue(), 1) : null };
+};
+
+// ev: the wanted Exposure Value, or null to keep it in step with the others.
+DazMcp.applyExposure = function (ev) {
+	var e = DazMcp.exposureProps();
+	if (!e.shutter || !e.f_stop || !e.iso) { return false; }
+	var n = e.f_stop.getValue(), iso = e.iso.getValue();
+	if (!(n > 0) || !(iso > 0)) { return false; }
+	if (ev === null || ev === undefined) {
+		if (e.ev) { e.ev.setValue(Math.log(n * n * e.shutter.getValue() * 100 / iso) / Math.LN2); }
+		return true;
+	}
+	e.shutter.setValue(Math.pow(2, ev) * iso / (100 * n * n));
+	// the shutter may stop at its limits: report the exposure it really gives
+	if (e.ev) { e.ev.setValue(Math.log(n * n * e.shutter.getValue() * 100 / iso) / Math.LN2); }
+	return true;
 };
 
 DazMcp.RENDER_LABELS = {
@@ -797,12 +862,26 @@ DazMcp.applyRenderSettings = function (args) {
 		p = DazMcp.findRenderProp(DazMcp.RENDER_LABELS[key]);
 		if (p) { DazMcp.setPropValue(p, args[key]); } else { notFound.push(key); }
 	}
+	var ev = typeof args.exposure === "number" ? args.exposure : null;
+	var exposureTouched = ev !== null;
 	if (args.properties) {
 		for (key in args.properties) {
 			if (!args.properties.hasOwnProperty(key)) { continue; }
+			if (DazMcp.lower(key) === "exposure value" && typeof args.properties[key] === "number") {
+				ev = args.properties[key];
+				exposureTouched = true;
+				continue;
+			}
 			p = DazMcp.findRenderProp([key]);
-			if (p) { DazMcp.setPropValue(p, args.properties[key]); } else { notFound.push(key); }
+			if (p) {
+				DazMcp.setPropValue(p, args.properties[key]);
+				if (/^(shutter speed|f\/stop|film iso)/i.test(key)) { exposureTouched = true; }
+			} else { notFound.push(key); }
 		}
+	}
+	if (exposureTouched && !DazMcp.applyExposure(ev) && ev !== null) {
+		p = DazMcp.findRenderProp(DazMcp.EXPOSURE.ev);
+		if (p) { p.setValue(ev); } else { notFound.push("exposure"); }
 	}
 
 	var out = { renderer: null, not_found: notFound };
@@ -814,6 +893,8 @@ DazMcp.applyRenderSettings = function (args) {
 		p = DazMcp.findRenderProp(DazMcp.RENDER_LABELS[key]);
 		if (p) { out[key] = DazMcp.propInfo(p).value; }
 	}
+	var exposure = DazMcp.exposureInfo();
+	if (exposure) { out.exposure = exposure; }
 	return out;
 };
 

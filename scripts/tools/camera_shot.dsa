@@ -17,8 +17,11 @@
 //   focal_length mm; default per shot (over_the_shoulder works it out)
 //   lead_room    (0..0.3, default 0.12) share of the picture width the face moves away
 //                from the side it looks to (room to look into); 0 centers it
-//   max_distance (cm) keep the camera this close to its aim point (a small room, a wall
-//                behind it); a shorter lens keeps the framing
+//   max_distance (cm) keep the camera this close to its aim point; a shorter lens keeps
+//                the framing
+//   avoid_walls  (bool, default true) look along the line from the face to the camera for
+//                walls and other props; when one is in the way, bring the camera in front
+//                of it (WALL_GAP cm) with a shorter lens that keeps the framing
 //   camera       (string) camera label, created if missing (default "Shot")
 //   make_active  (bool, default true)
 
@@ -32,6 +35,9 @@ var SHOTS = {
 	two_shot: { frame: 3.6, eyes: 0.27, focal: 40, angle: 90 }
 };
 var EYES = { left: ["l_eye", "lEye"], right: ["r_eye", "rEye"] };
+var WALL_GAP = 20;     // cm between the camera and the wall it is moved in front of
+var NEAR_FACE = 12;    // cm: what is this close to the face (a chair back, a hat) is not a wall
+var MIN_FOCAL = 14;    // mm: a wider lens than this distorts a face too much
 var UP = [0, 1, 0];
 
 function v3(p) { return [p.x, p.y, p.z]; }
@@ -79,6 +85,61 @@ function segDist(p, a, b) {
 	var ab = sub(b, a);
 	var t = Math.max(0, Math.min(1, dot(sub(p, a), ab) / Math.max(dot(ab, ab), 1e-9)));
 	return len(sub(p, add(a, mul(ab, t))));
+}
+
+// A prop parented (at any depth) to a figure or a bone: a hat, a glass in a hand.
+function heldByFigure(n) {
+	var p = n.getNodeParent(), t;
+	while (p) {
+		t = DazMcp.nodeType(p);
+		if (t === "bone" || t === "figure" || t === "fitted_figure" || DazMcp.ownerFigure(p)) { return true; }
+		p = p.getNodeParent();
+	}
+	return false;
+}
+
+// Nearest prop surface along the ray from `from` (unit `dir`) within maxLen,
+// as {t, node}, or null. Figures and what they wear or hold are not walls.
+function wallHit(from, dir, maxLen) {
+	var to = add(from, mul(dir, maxLen));
+	var seg = { min: [Math.min(from[0], to[0]) - 1, Math.min(from[1], to[1]) - 1, Math.min(from[2], to[2]) - 1],
+		max: [Math.max(from[0], to[0]) + 1, Math.max(from[1], to[1]) + 1, Math.max(from[2], to[2]) + 1] };
+	var all = Scene.getNodeList();
+	var best = null, i, n, t, box, tris, k, o, a, e1, e2, pv, det, inv, tv, u, qv, v, d;
+	for (i = 0; i < all.length; i++) {
+		n = all[i];
+		t = DazMcp.nodeType(n);
+		if (t !== "prop") { continue; }
+		try { if (!n.isVisible() || heldByFigure(n)) { continue; } } catch (e0) { continue; }
+		try { box = n.getWSBoundingBox(); } catch (e1x) { continue; }
+		if (!box || !box.isValid()) { continue; }
+		if (box.max.x < seg.min[0] || box.min.x > seg.max[0] || box.max.y < seg.min[1] || box.min.y > seg.max[1] ||
+			box.max.z < seg.min[2] || box.min.z > seg.max[2]) { continue; }
+		tris = DazMcp.meshTriangles([n], seg);
+		for (k = 0; k < tris.count; k++) {
+			o = k * 9;
+			a = [tris.p[o], tris.p[o + 1], tris.p[o + 2]];
+			e1 = [tris.p[o + 3] - a[0], tris.p[o + 4] - a[1], tris.p[o + 5] - a[2]];
+			e2 = [tris.p[o + 6] - a[0], tris.p[o + 7] - a[1], tris.p[o + 8] - a[2]];
+			pv = cross(dir, e2);
+			det = dot(e1, pv);
+			if (Math.abs(det) < 1e-9) { continue; }
+			inv = 1 / det;
+			tv = sub(from, a);
+			u = dot(tv, pv) * inv;
+			if (u < 0 || u > 1) { continue; }
+			qv = cross(tv, e1);
+			v = dot(dir, qv) * inv;
+			if (v < 0 || u + v > 1) { continue; }
+			d = dot(e2, qv) * inv;
+			if (d > NEAR_FACE && d < maxLen && (!best || d < best.t)) {
+				// how squarely the ray meets the wall (1 = straight on)
+				var nn = cross(e1, e2);
+				best = { t: d, node: String(n.getLabel()), facing: Math.abs(dot(dir, nn)) / Math.max(len(nn), 1e-9) };
+			}
+		}
+	}
+	return best;
 }
 
 function dazmcpTool(args) {
@@ -158,6 +219,44 @@ function dazmcpTool(args) {
 		pos = add(add(target, mul(c, dist)), mul(UP, args.height || 0));
 	}
 
+	// Walls: the line from the aim point to the camera must be clear.
+	var wall = null, pulled = 0, wallNote = null;
+	if (args.avoid_walls !== false) {
+		var ray = sub(pos, target), rayLen = len(ray);
+		var hit = rayLen > 1 ? wallHit(target, mul(ray, 1 / rayLen), rayLen + WALL_GAP / 0.3) : null;
+		if (hit) {
+			// WALL_GAP away from the wall itself, not only along the slanted ray
+			var keep = hit.t - WALL_GAP / Math.max(hit.facing, 0.3);
+			wall = { node: hit.node, distance_cm: DazMcp.round(hit.t, 1) };
+			if (keep < NEAR_FACE + 5) {
+				// no room in front of the wall: moving would put the camera in or past it
+				wallNote = "A wall (" + hit.node + ") is " + DazMcp.round(hit.t, 1) + " cm from the face on this side: " +
+					"there is no room for the camera. Change side, angle or shot, or move the figures away from it.";
+			} else if (keep < rayLen) {
+				var newPos = add(target, mul(ray, keep / rayLen));
+				if (shotName === "over_the_shoulder" && dot(sub(newPos, P.eyes), mul(ray, 1 / rayLen)) < 8) {
+					wallNote = "A wall (" + hit.node + ") is right behind " + P.label + ": there is no room for an " +
+						"over the shoulder shot here. Use a close_up, or turn the pair away from the wall.";
+				} else {
+					pulled = rayLen - keep;
+					if (shotName === "over_the_shoulder" && !args.focal_length) {
+						focal = Math.max(24, Math.min(200, 18 * len(sub(target, newPos)) / (aspect * frameH / 2)));
+					} else {
+						// a lens shorter in step with the distance keeps the framing
+						focal = focal * keep / rayLen;
+						if (focal < MIN_FOCAL) {
+							wallNote = "The room is too tight for this framing: the lens would be " +
+								DazMcp.round(focal, 1) + " mm. It is kept at " + MIN_FOCAL + " mm, so the shot is " +
+								"tighter than asked. Try a closer shot or another angle.";
+							focal = MIN_FOCAL;
+						}
+					}
+					pos = newPos;
+				}
+			}
+		}
+	}
+
 	// Room to look into: move the face away from the side it looks to.
 	var lead = typeof args.lead_room === "number" ? Math.max(0, Math.min(0.3, args.lead_room)) : 0.12;
 	if (shotName !== "two_shot" && lead > 0) {
@@ -166,7 +265,9 @@ function dazmcpTool(args) {
 		var gp = sub(g, mul(view, dot(g, view)));
 		if (len(gp) > 1e-3) {
 			gp = mul(gp, 1 / len(gp));
-			target = add(target, mul(gp, lead * frameH * aspect));
+			// the picture width at the face, from the lens really used (a tight room
+			// may have kept it longer than the framing needs)
+			target = add(target, mul(gp, lead * 2 * len(sub(target, pos)) * 18 / focal));
 		}
 	}
 
@@ -203,6 +304,12 @@ function dazmcpTool(args) {
 	out.angle = shotName === "over_the_shoulder" ? null : angle;
 	out.distance_cm = DazMcp.round(len(sub(target, pos)), 1);
 	out.subject_eyes = r(S.eyes);
+	if (wall) {
+		out.wall_cm = wall.distance_cm;
+		out.wall = wall.node;
+	}
+	if (pulled > 0) { out.pulled_in_cm = DazMcp.round(pulled, 1); }
+	if (wallNote) { out.warning = wallNote; }
 	if (blocked.length) {
 		out.blocked_by = blocked;
 		out.hint = "These heads are between the camera and " + S.label + "'s face. Raise angle, " +

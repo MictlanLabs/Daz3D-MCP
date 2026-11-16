@@ -33,11 +33,15 @@ and the eyes; what stays is the set, the light and where the people are.
     vulnerable); -10 to -15 looks up (strong, threatening). Keep 0 for
     neutral lines.
   - `lead_room` (0.12) moves the face away from the side it looks to, so it
-    has room to look into. `max_distance` keeps the camera inside a small
-    room (a wider lens keeps the framing).
+    has room to look into.
+  - Walls: camera_shot looks along the line from the face to the camera for
+    walls and other props. When one is in the way, the camera comes in front
+    of it with a shorter lens that keeps the framing (`wall`, `wall_cm`,
+    `pulled_in_cm`). Below 14 mm it stops and says so in `warning`: pick a
+    closer shot or another angle. `max_distance` still caps the distance by
+    hand; `avoid_walls=false` turns the check off.
   - `blocked_by` names heads in front of the face: raise `angle`, use
-    `over_the_shoulder`, or move the figure. Walls and furniture are not
-    checked: look at the image.
+    `over_the_shoulder`, or move the figure.
 - `render_shots(beats=[...])` renders a whole conversation: each beat sets
   `faces` ({figure: expression or {expression, strength, values}}), `gaze`
   ({figure: target or {target, head}}; `"camera"` looks into the lens), frames

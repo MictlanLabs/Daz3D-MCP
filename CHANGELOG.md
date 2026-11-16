@@ -12,6 +12,39 @@ noted below when it changes.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-15
+
+### Added
+
+- `render_settings(exposure=...)` sets the Iray Exposure Value; the result
+  reports `exposure` (EV, shutter speed, f-stop, ISO).
+- `camera_shot(avoid_walls=true)`: walls and other props between the face and
+  the camera are found by themselves (`wall`, `wall_cm`, `pulled_in_cm`).
+- `package_inspect` and `package_install` report `requires`: products a package
+  needs that are not installed.
+
+### Fixed
+
+- `light_create` made spot and point lights with Photometric Mode off, so Iray
+  ignored their lumens. They are now made like Daz's Create menu makes them,
+  and `light_set(power=...)` turns the mode on for an older light.
+- Setting "Exposure Value" by script did not change the render: Iray uses the
+  shutter speed, f-stop and ISO. The value is now turned into a shutter speed,
+  and changing those three keeps Exposure Value in step.
+- `import_mesh(room=true)` took the largest level surface for the floor, which
+  in a building with a flat roof is the roof (the Wild West Saloon sank
+  6.9 m). The floor is now the largest level surface with something over it
+  and room to stand on it (of storeys about as big, the lowest), at the height
+  most of it is at. The saloon now stands on its ground floor boards.
+- `camera_shot` put the camera outside or behind the walls of a small room
+  unless `max_distance` was given by hand. It now comes in front of the wall
+  with a shorter lens that keeps the framing, and warns below 14 mm.
+- `package_install` gave no warning when a package needs a base figure (e.g.
+  Genesis 8.1 Female), the product a morph pack is for, or a body morph pack
+  its presets dial (e.g. Vlad Gens, Breastacular).
+- `package_inspect` could fail on Windows on packages with a nested .zip,
+  while removing its temporary folder.
+
 ## [0.5.0] - 2026-11-15
 
 ### Added
@@ -90,7 +123,8 @@ noted below when it changes.
 - First MCP server, bridge plugin, scene tools, `setup`, `install` and `doctor`
   commands.
 
-[Unreleased]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v0.2.0...v0.3.0

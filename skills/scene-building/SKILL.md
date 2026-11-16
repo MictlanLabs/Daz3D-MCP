@@ -88,8 +88,10 @@ them), not `content_load`.
 ## Lights
 
 - `light_create(type="spot", position, look_at, power, color)` adds a light.
-  Spot and point lights use lumens (Iray default 1500). A key light 2.5 m away
-  usually needs 3000 to 8000 lm.
+  Spot and point lights use lumens (Iray default 1500) and are made in
+  Photometric Mode, as from Daz's Create menu (`photometric: true`). A key
+  light 2.5 m away usually needs 3000 to 8000 lm. `light_set(power=...)` turns
+  Photometric Mode on for an older light that had it off.
 - Classic three-point lighting for people: key 45 degrees to one side and
   above, fill on the other side at a third to half the key's power, rim
   behind them pointing at their shoulders.

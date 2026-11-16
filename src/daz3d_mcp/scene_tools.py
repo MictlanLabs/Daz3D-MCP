@@ -573,17 +573,22 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient],
                                                                     "away from the side it looks to; 0 "
                                                                     "centers it.")] = 0.12,
         max_distance: Annotated[float | None, Field(gt=0, description="cm; keeps the camera this close to the "
-                                                                      "face (a small room, a wall behind it) "
-                                                                      "with a wider lens.")] = None,
+                                                                      "face with a wider lens. Walls are "
+                                                                      "found by themselves (avoid_walls).")] = None,
+        avoid_walls: Annotated[bool, Field(description="Look for walls, furniture and other props between the "
+                                                       "face and the camera, and bring the camera in front of "
+                                                       "them with a wider lens.")] = True,
         camera: Annotated[str, Field(description="Camera label; created if missing.")] = "Shot",
         make_active: bool = True,
     ) -> dict:
         """Places a camera for a film shot of a character's face (close-up, over the shoulder,
         two shot...), aimed and sized from the face itself, on a consistent side of the line to the
-        person they talk to, so shots and reverse shots cut together. Reports heads in the way."""
+        person they talk to, so shots and reverse shots cut together. In a room it keeps the camera in
+        front of the walls (wall_cm, pulled_in_cm). Reports heads in the way."""
         return await call("camera_shot", _clean(subject=subject, shot=shot, partner=partner, side=side, angle=angle,
                                                 height=height, focal_length=focal_length, lead_room=lead_room,
-                                                max_distance=max_distance, camera=camera, make_active=make_active))
+                                                max_distance=max_distance, avoid_walls=avoid_walls, camera=camera,
+                                                make_active=make_active))
 
     # --------------------------------------------------------- lights ----
     @mcp.tool(annotations=CHANGES_SCENE)
@@ -600,7 +605,8 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient],
         properties: Annotated[dict[str, Any] | None, Field(description="{label: value} other light "
                                                                        "properties.")] = None,
     ) -> dict:
-        """Adds a light, placed and aimed at a node or point."""
+        """Adds a light, placed and aimed at a node or point. Spot and point lights are made in
+        Photometric Mode (as from Daz's Create menu), so power in lumens is what Iray renders."""
         return await call("light_create", _clean(type=type, label=label, position=position, look_at=look_at,
                                                  rotation=rotation, power=power, color=color,
                                                  spread_angle=spread_angle, properties=properties))
@@ -618,7 +624,8 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient],
         label: Annotated[str | None, Field(description="New label.")] = None,
         properties: dict[str, Any] | None = None,
     ) -> dict:
-        """Changes a light: placement, aim, power, color, on/off."""
+        """Changes a light: placement, aim, power, color, on/off. Giving power turns on Photometric
+        Mode when it is off (lumens do nothing without it)."""
         return await call("light_set", _clean(light=light, position=position, look_at=look_at, rotation=rotation,
                                               power=power, color=color, spread_angle=spread_angle, on=on,
                                               label=label, properties=properties))
@@ -668,12 +675,19 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient],
         max_samples: Annotated[int | None, Field(ge=1)] = None,
         max_time: Annotated[float | None, Field(ge=1, description="Seconds.")] = None,
         quality: Annotated[float | None, Field(gt=0, description="Iray Rendering Quality, 1 = default.")] = None,
+        exposure: Annotated[float | None, Field(ge=-10, le=25, description="Iray Exposure Value (EV). 13 (the "
+                                                                          "default) suits daylight; lit "
+                                                                          "interiors need about 7 to 9, night "
+                                                                          "scenes less. Lower = brighter.")] = None,
         properties: Annotated[dict[str, Any] | None, Field(description="{label: value} other render "
                                                                        "settings.")] = None,
     ) -> dict:
-        """Reads the render settings (renderer, size, limits) and changes the ones given."""
+        """Reads the render settings (renderer, size, limits, exposure) and changes the ones given.
+        exposure (or "Exposure Value" in properties) is turned into the Shutter Speed Iray really uses,
+        keeping F/Stop and Film ISO; changing those three keeps Exposure Value in step."""
         return await call("render_settings", _clean(width=width, height=height, max_samples=max_samples,
-                                                    max_time=max_time, quality=quality, properties=properties))
+                                                    max_time=max_time, quality=quality, exposure=exposure,
+                                                    properties=properties))
 
     @mcp.tool(annotations=CHANGES_SCENE, structured_output=False)
     async def render(

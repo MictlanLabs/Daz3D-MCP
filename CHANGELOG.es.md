@@ -13,6 +13,42 @@ que se anota abajo cuando cambia.
 
 ## [Sin publicar]
 
+## [0.5.1] - 2026-11-15
+
+### Agregado
+
+- `render_settings(exposure=...)` fija el Exposure Value de Iray; el resultado
+  informa `exposure` (EV, velocidad de obturación, f-stop, ISO).
+- `camera_shot(avoid_walls=true)`: encuentra por sí solo las paredes y otros
+  props entre la cara y la cámara (`wall`, `wall_cm`, `pulled_in_cm`).
+- `package_inspect` y `package_install` informan `requires`: los productos que
+  un paquete necesita y no están instalados.
+
+### Corregido
+
+- `light_create` creaba las luces spot y point con Photometric Mode apagado,
+  así que Iray ignoraba sus lúmenes. Ahora se crean como desde el menú Create
+  de Daz, y `light_set(power=...)` enciende el modo en una luz anterior.
+- Cambiar "Exposure Value" por script no cambiaba el render: Iray usa la
+  velocidad de obturación, el f-stop y el ISO. Ahora el valor se convierte en
+  velocidad de obturación, y cambiar esos tres mantiene el Exposure Value al día.
+- `import_mesh(room=true)` tomaba como suelo la superficie horizontal más
+  grande, que en un edificio de techo plano es el techo (el Wild West Saloon se
+  hundía 6.9 m). Ahora el suelo es la superficie horizontal más grande que
+  tiene algo encima y espacio para estar de pie (entre pisos de tamaño parecido,
+  el más bajo), a la altura donde está la mayor parte. El saloon queda ahora
+  sobre las tablas de la planta baja.
+- `camera_shot` dejaba la cámara fuera o detrás de las paredes de un cuarto
+  pequeño si no se daba `max_distance` a mano. Ahora se pone delante de la
+  pared con una lente más corta que conserva el encuadre, y avisa por debajo de
+  14 mm.
+- `package_install` no avisaba cuando un paquete necesita una figura base (p. ej.
+  Genesis 8.1 Female), el producto para el que es un paquete de morphs, o un
+  paquete de morphs del cuerpo que mueven sus presets (p. ej. Vlad Gens,
+  Breastacular).
+- `package_inspect` podía fallar en Windows con paquetes que traen un .zip
+  dentro, al borrar su carpeta temporal.
+
 ## [0.5.0] - 2026-11-15
 
 ### Agregado
@@ -99,7 +135,8 @@ que se anota abajo cuando cambia.
 - Primer servidor MCP, plugin puente, herramientas de escena y los comandos
   `setup`, `install` y `doctor`.
 
-[Sin publicar]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v0.5.0...HEAD
+[Sin publicar]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v0.2.0...v0.3.0

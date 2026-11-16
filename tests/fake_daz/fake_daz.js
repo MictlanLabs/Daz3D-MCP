@@ -157,8 +157,22 @@ function defaultRenderProps() {
 		"Environment Intensity": { type: "float", value: 1, min: 0, max: 1000 },
 		"Environment Map": { type: "image", value: null, mappable: true, map: null },
 		"Dome Rotation": { type: "float", value: 0, min: -360, max: 360 },
-		"Draw Dome": { type: "bool", value: true }
+		"Draw Dome": { type: "bool", value: true },
+		// Tone mapper, as in Daz Studio 6: Iray renders with the shutter, f-stop and
+		// ISO; "Exposure Value" only follows them in the Render Settings pane.
+		"Exposure Value": { type: "float", value: 13, min: -100, max: 100 },
+		"Shutter Speed (1/x)": { type: "float", value: 128, min: 0.0001, max: 100000 },
+		"F/Stop": { type: "float", value: 8, min: 0.1, max: 1000 },
+		"Film ISO": { type: "float", value: 100, min: 1, max: 100000 }
 	};
+}
+
+// The exposure Iray really renders with (EV at ISO 100).
+function renderedEv() {
+	var r = state.renderProps;
+	if (!r["Shutter Speed (1/x)"]) { return null; }
+	var n = r["F/Stop"].value;
+	return Math.log(n * n * r["Shutter Speed (1/x)"].value * 100 / r["Film ISO"].value) / Math.LN2;
 }
 
 function lightProps(kind) {
@@ -172,6 +186,9 @@ function lightProps(kind) {
 		p["Luminous Flux (Lumen)"] = { type: "float", value: 1500, min: 0, max: 10000000 };
 	}
 	if (kind === "spot") { p["Spread Angle"] = { type: "float", value: 20, min: 0, max: 180 }; }
+	// A light made by script starts with Photometric Mode off, as in Daz Studio 6.
+	p["Photometric Mode"] = { type: "bool", value: false };
+	p["Render Emitter"] = { type: "bool", value: true };
 	return p;
 }
 
@@ -1105,6 +1122,12 @@ var renderMgr = {
 			max_samples: state.renderProps["Max Samples"].value,
 			max_time: state.renderProps["Max Time (secs)"].value,
 			lights: state.nodes.filter(function (n) { return /Light$/.test(n.class); }).length,
+			// lumens only count in Photometric Mode
+			lumens: state.nodes.filter(function (n) {
+				return /Light$/.test(n.class) && n.props["Photometric Mode"] && n.props["Photometric Mode"].value;
+			}).map(function (n) { return n.props["Luminous Flux (Lumen)"] ? n.props["Luminous Flux (Lumen)"].value : 0; })
+				.reduce(function (a, b) { return a + b; }, 0),
+			ev: renderedEv(),
 			environment_mode: state.renderProps["Environment Mode"].items[state.renderProps["Environment Mode"].value],
 			figures: renderSummary(cam && cam.inherits("DzCamera") && byId(cam.d.id) ? cam : null),
 			not_in_render: state.nodes.filter(function (n) { return n.render_visible === false; })
@@ -1311,7 +1334,8 @@ function parseObj(file, opts) {
 	var axes = { X: 0, Y: 1, Z: 2 };
 	var lat = axes[opts.LatAxis || "X"], vert = axes[opts.VertAxis || "Y"], depth = axes[opts.DepthAxis || "Z"];
 	var scale = opts.Scale;
-	var mn = null, mx = null, mats = [];
+	var mn = null, mx = null, mats = [], boxes = [], box = null;
+	// Each "g" group becomes one box of the fake mesh (the bounds of its vertices).
 	fs.readFileSync(file, "utf8").split(/\r?\n/).forEach(function (line) {
 		var parts = line.trim().split(/\s+/);
 		if (parts[0] === "v") {
@@ -1319,11 +1343,15 @@ function parseObj(file, opts) {
 			var p = [raw[lat] * scale, raw[vert] * scale, raw[depth] * scale * (opts.InvertDepth ? -1 : 1)];
 			if (!mn) { mn = p.slice(); mx = p.slice(); }
 			for (var i = 0; i < 3; i++) { mn[i] = Math.min(mn[i], p[i]); mx[i] = Math.max(mx[i], p[i]); }
+			if (!box) { box = [p.slice(), p.slice()]; boxes.push(box); }
+			for (var j = 0; j < 3; j++) { box[0][j] = Math.min(box[0][j], p[j]); box[1][j] = Math.max(box[1][j], p[j]); }
+		} else if (parts[0] === "g") {
+			box = null;
 		} else if (parts[0] === "usemtl" && opts.IncludeUsemtl && mats.indexOf(parts[1]) < 0) {
 			mats.push(parts[1]);
 		}
 	});
-	return { bbox: [mn, mx], materials: mats.length ? mats : ["default"], bones: [] };
+	return { bbox: [mn, mx], materials: mats.length ? mats : ["default"], bones: [], boxes: boxes };
 }
 
 // A small binary FBX reader: enough for unit, vertices, materials and bones.
@@ -1464,6 +1492,7 @@ function makeImporter(cls, ext) {
 			var d = {
 				class: mesh.bones.length ? "DzFigure" : "DzNode", label: label, name: label.replace(/\W/g, "_"),
 				geometry: true, bbox_local: mesh.bbox, position: [0, 0, 0], rotation: [0, 0, 0],
+				mesh_boxes: mesh.boxes && mesh.boxes.length > 1 ? mesh.boxes : undefined,
 				imported_from: file,
 				// the FBX importer gives the PBR shader, which has no refraction
 				materials: mesh.materials.map(function (m) {

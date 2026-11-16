@@ -12,8 +12,11 @@
 //   label         (string) label for the imported node
 //   position      [x, y, z] cm
 //   drop_to_floor (bool) put its lowest point at Y = 0
-//   room          (bool) with drop_to_floor: put its floor (largest level
-//                 surface) at Y = 0 instead
+//   room          (bool) with drop_to_floor: put its floor at Y = 0 instead: the
+//                 largest level surface with something over it (an upper floor,
+//                 a ceiling, a roof) and room to stand on it (see findFloor), so
+//                 neither the roof of a building nor the ground around or under
+//                 it is taken for the floor
 //   take          (string) FBX: animation take to read
 //   options       {key: value} extra importer settings (DzFileIOSettings)
 //   drop_empties  (bool) remove what came in with no mesh and nothing under it
@@ -103,6 +106,120 @@ function applyGlass(nodes, names, warnings) {
 		}
 	}
 	return done;
+}
+
+// The floor of a room or building, among its large level surfaces. The
+// largest one is often the roof (a flat roof is as big as the building) or
+// the ground around it. The floor is the largest one that is mostly under
+// something (an upper floor, a ceiling, a roof) with room to stand on it;
+// of floors about that big (storeys), the lowest. COVER_GAP: a person's height.
+var COVER_GAP = 150;
+var COVERED = 0.5;     // share of a surface that must be under something
+var BIG = 0.1;         // a floor is at least this share of the largest surface at or above it
+var LOW_GAP = 3;       // cm: thinner gaps are one surface, not one over another
+var CELLS = 40;        // coverage grid, cells along the longer side
+var STOREY = 0.8;      // floors at least this share of the largest one count as storeys
+
+// Share of surface s (in X/Z) that has geometry over it, as a union: each
+// grid cell of the surface counts once however many storeys are above it.
+// ownTris: the set s.tris points into; tris: everything that can cover it,
+// counted between lo and hi cm above the surface.
+function coverOf(s, ownTris, tris, lo, hi) {
+	var x0 = s.xz_min[0], z0 = s.xz_min[1];
+	var cell = Math.max(5, Math.max(s.xz_max[0] - x0, s.xz_max[1] - z0) / CELLS);
+	var own = {}, over = {}, nOwn = 0, nOver = 0;
+	var mark = function (P, o, set) {
+		var a = Math.floor((Math.min(P[o], P[o + 3], P[o + 6]) - x0) / cell);
+		var b = Math.floor((Math.max(P[o], P[o + 3], P[o + 6]) - x0) / cell);
+		var c = Math.floor((Math.min(P[o + 2], P[o + 5], P[o + 8]) - z0) / cell);
+		var d = Math.floor((Math.max(P[o + 2], P[o + 5], P[o + 8]) - z0) / cell);
+		var x, z, k, added = 0;
+		for (x = Math.max(a, 0); x <= Math.min(b, CELLS + 1); x++) {
+			for (z = Math.max(c, 0); z <= Math.min(d, CELLS + 1); z++) {
+				k = x + "," + z;
+				if (!set[k]) { set[k] = true; added++; }
+			}
+		}
+		return added;
+	};
+	var i, k, j;
+	for (k = 0; k < s.tris.length; k++) { nOwn += mark(ownTris.p, s.tris[k] * 9, own); }
+	for (j = 0; j < tris.flat.length; j++) {
+		i = tris.flat[j];
+		if (tris.cy[j] >= s.y + lo && tris.cy[j] <= s.y + hi) { mark(tris.p, i * 9, over); }
+	}
+	for (k in own) { if (own.hasOwnProperty(k) && over[k]) { nOver++; } }
+	return nOwn ? nOver / nOwn : 0;
+}
+
+// The height most of a surface is at. A surface joins triangles whose heights
+// step by up to 2 cm, so a floor with rugs, a step or a stage can average
+// well above its boards: take the 1 cm band with the most area instead.
+function mainHeight(s) {
+	var bins = {}, i, o, cy, key, best = null, sum = 0, w = 0, P = s.own.p, A = s.own.area;
+	for (i = 0; i < s.tris.length; i++) {
+		o = s.tris[i] * 9;
+		key = Math.floor((P[o + 1] + P[o + 4] + P[o + 7]) / 3);
+		bins[key] = (bins[key] || 0) + A[s.tris[i]];
+		if (best === null || bins[key] > bins[best]) { best = key; }
+	}
+	for (i = 0; i < s.tris.length; i++) {
+		o = s.tris[i] * 9;
+		cy = (P[o + 1] + P[o + 4] + P[o + 7]) / 3;
+		if (Math.abs(cy - (best + 0.5)) <= 1.5) { sum += cy * A[s.tris[i]]; w += A[s.tris[i]]; }
+	}
+	return w ? sum / w : s.y;
+}
+
+// Surfaces of every root, measured against one triangle set of them all (a
+// Blender export brings the floor, ceiling and roof as separate objects).
+function findFloor(roots) {
+	var nodes = [], all = [], i, k, found, tris = null, largest = 0, best = null, cands = [], c, fallback = null;
+	for (i = 0; i < roots.length; i++) {
+		nodes = nodes.concat(DazMcp.propMeshNodes(roots[i]));
+		found = DazMcp.supportSurfaces(roots[i], { min_area: 10000 });
+		for (k = 0; k < found.surfaces.length; k++) {
+			found.surfaces[k].own = found.tris;
+			all.push(found.surfaces[k]);
+		}
+		if (roots.length === 1) { tris = found.tris; }
+	}
+	if (!all.length) { return null; }
+	if (!tris) { tris = DazMcp.meshTriangles(nodes, null); }
+	// the triangles that can cover a floor (not walls), and their heights
+	tris.flat = [];
+	tris.cy = [];
+	for (i = 0; i < tris.count; i++) {
+		if (Math.abs(tris.n[i * 3 + 1]) < 0.2) { continue; }
+		tris.flat.push(i);
+		tris.cy.push((tris.p[i * 9 + 1] + tris.p[i * 9 + 4] + tris.p[i * 9 + 7]) / 3);
+	}
+	// Lowest first. Measured against the largest surface at or above it, so a
+	// table top is too small to be the floor, but a street or terrain much
+	// bigger than the building does not hide the floor either.
+	all.sort(function (a, b) { return b.y - a.y; });
+	for (i = 0; i < all.length; i++) {
+		if (all[i].area > largest) { largest = all[i].area; }
+		if (all[i].area >= BIG * largest) { cands.push(all[i]); }
+		if (!fallback || all[i].area > fallback.area) { fallback = all[i]; }
+	}
+	var floors = [], top = 0;
+	for (i = 0; i < cands.length; i++) {
+		// the ground or a foundation under the floor boards has the floor right
+		// over it: there is no room to stand there
+		if (coverOf(cands[i], cands[i].own, tris, LOW_GAP, COVER_GAP) >= COVERED) { continue; }
+		c = coverOf(cands[i], cands[i].own, tris, COVER_GAP, 1e9);
+		if (c < COVERED) { continue; }
+		cands[i].cover = c;
+		floors.push(cands[i]);
+		if (cands[i].area > top) { top = cands[i].area; }
+	}
+	for (i = 0; i < floors.length; i++) {
+		if (floors[i].area >= STOREY * top && (!best || floors[i].y < best.y)) { best = floors[i]; }
+	}
+	// nothing is covered (an open set, no ceiling): the largest, as before
+	if (!best) { best = fallback; best.cover = 0; }
+	return { s: best, y: mainHeight(best), cover: best.cover, levels: cands.length };
 }
 
 // A power of ten that brings a size back to a room, prop or person (1 cm to 50 m).
@@ -226,16 +343,20 @@ function dazmcpTool(args) {
 		var lift = box ? -box.min[1] : 0;
 		if (args.room === true) {
 			// A room's lowest point is often the ground or scenery outside it:
-			// stand its floor, the largest level surface, on Y = 0 instead.
-			var best = null, found, k;
-			for (i = 0; i < roots.length; i++) {
-				found = DazMcp.supportSurfaces(roots[i], { min_area: 10000 }).surfaces;
-				for (k = 0; k < found.length; k++) { if (!best || found[k].area > best.area) { best = found[k]; } }
-			}
+			// stand its floor on Y = 0 instead.
+			var fl = findFloor(roots), best = fl ? fl.s : null;
 			if (best) {
-				lift = -best.y;
-				floorInfo = { was_at_y: DazMcp.round(best.y, 1), size_cm: [DazMcp.round(best.size[0], 1), DazMcp.round(best.size[1], 1)],
-					below_floor_cm: box ? DazMcp.round(best.y - box.min[1], 1) : 0 };
+				lift = -fl.y;
+				floorInfo = { was_at_y: DazMcp.round(fl.y, 1), size_cm: [DazMcp.round(best.size[0], 1), DazMcp.round(best.size[1], 1)],
+					below_floor_cm: box ? DazMcp.round(fl.y - box.min[1], 1) : 0,
+					covered: DazMcp.round(fl.cover, 2), levels: fl.levels };
+				if (box && box.max[1] - fl.y > 450) {
+					floorInfo.above_floor_cm = DazMcp.round(box.max[1] - fl.y, 1);
+				}
+				if (!fl.cover) {
+					warnings.push("Nothing was found over its largest level surface (no ceiling or upper floor), so " +
+						"that is taken for the floor. If it is a roof, use position to lower the model.");
+				}
 			} else {
 				warnings.push("No level surface of 1 m2 or more was found for a floor; its lowest point is at Y = 0.");
 			}

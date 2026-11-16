@@ -18,6 +18,7 @@ from pydantic import Field
 
 from daz3d_mcp import meshes, packages
 from daz3d_mcp.client import DazClient
+from daz3d_mcp.transport import read_bridge_info
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
 CHANGES_SCENE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False)
@@ -51,6 +52,23 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient], forg
         configured = get_client().settings.install_library
         return Path(configured).expanduser() if configured else default_library()
 
+    async def known_libraries() -> tuple[list[Path], str | None]:
+        """Every content library to look for a package's requirements in."""
+        settings = get_client().settings
+        paths = [Path(p).expanduser() for p in (settings.content_libraries or [])]
+        partial = ("so requirements were looked for only in the libraries in settings.json and the install "
+                   "library.")
+        # Only ask a running bridge: without one, a call would start Daz Studio
+        # (no-plugin mode) and inspecting a .zip must not.
+        if settings.transport == "file" or (settings.transport != "http" and read_bridge_info() is None):
+            return paths, f"Daz Studio is not connected, {partial}"
+        try:
+            result = await call("content_libraries", None, 15)
+            paths += [Path(lib["path"]) for lib in result.get("libraries", [])]
+        except ToolError as exc:
+            return paths, f"Daz Studio did not list its content libraries ({exc}), {partial}"
+        return paths, None
+
     async def register_library(path: Path, kind: str) -> dict:
         result = await call("content_add_library", {"path": path.as_posix(), "kind": kind})
         forget_index()
@@ -64,18 +82,29 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient], forg
     ) -> dict:
         """Looks inside a content package before installing it: where its Daz content root is (data,
         People, Props, Runtime...), which files can be loaded, loose OBJ/FBX meshes, extras and
-        problems. Nothing is written."""
+        problems. requires lists the products it needs that are not installed (a base figure such as
+        Genesis 8.1 Female, a body morph pack, the outfit a morph pack is for): install those first.
+        Nothing is written."""
         source = _abs(path)
         max_bytes = int(get_client().settings.max_package_gb * 1e9)
+        libs, note = await known_libraries()
+        libs.append(install_library(None))
 
         def run() -> dict:
-            with tempfile.TemporaryDirectory(prefix="dazmcp-pkg-") as tmp:
-                return packages.summarize(packages.plan_package(source, Path(tmp), max_bytes))
+            with tempfile.TemporaryDirectory(prefix="dazmcp-pkg-", ignore_cleanup_errors=True) as tmp:
+                plan = packages.plan_package(source, Path(tmp), max_bytes)
+                out = packages.summarize(plan)
+                out["requires"] = packages.missing_requirements(plan, libs)
+                out["warnings"] = packages.requirement_warnings(out["requires"]) + out["warnings"]
+                return out
 
         try:
-            return await anyio.to_thread.run_sync(run)
+            result = await anyio.to_thread.run_sync(run)
         except packages.PackageError as exc:
             raise ToolError(str(exc)) from exc
+        if note:
+            result["warnings"].append(note)
+        return result
 
     @mcp.tool(annotations=CHANGES_SCENE)
     async def package_install(
@@ -91,15 +120,19 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient], forg
         """Installs a content package from another store (Renderosity, RuntimeDNA, CGBytes, free sites):
         finds its content root, copies it into a content library, makes sure Daz Studio has that
         library, and returns the new items (paths for content_load) and any loose meshes (paths for
-        import_mesh). Records every file so package_uninstall can remove them."""
+        import_mesh). Records every file so package_uninstall can remove them. requires (and a warning) names
+        the products it needs that are not installed, e.g. the base figure a character is for."""
         source = _abs(path)
         lib = install_library(library)
         settings = get_client().settings
+        libs, note = await known_libraries()
         try:
             result = await anyio.to_thread.run_sync(
-                lambda: packages.install(source, lib, overwrite, int(settings.max_package_gb * 1e9), name))
+                lambda: packages.install(source, lib, overwrite, int(settings.max_package_gb * 1e9), name, libs))
         except packages.PackageError as exc:
             raise ToolError(str(exc)) from exc
+        if note:
+            result["warnings"].append(note)
         result["daz_library"] = None
         if result["layout"] in ("daz", "poser"):
             try:
@@ -185,8 +218,9 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient], forg
         drop_to_floor: Annotated[bool, Field(description="Put its lowest point on the floor. Leave off for "
                                                          "clothing modeled around a figure.")] = False,
         room: Annotated[bool, Field(description="A room or set: drop_to_floor stands its floor (the largest "
-                                                "level surface) on Y = 0, not its lowest point, which is often "
-                                                "ground or scenery outside.")] = False,
+                                                "level surface with something over it and room to stand, so not "
+                                                "a flat roof, an upper storey or the ground) on Y = 0, not its "
+                                                "lowest point, which is often ground or scenery outside.")] = False,
         take:Annotated[str | None, Field(description="FBX: animation take to import.")] = None,
         scale: Annotated[float | None, Field(gt=0, description="Multiply its size by this, e.g. 0.1 when "
                                                                "mesh_inspect or a first import says it is 10x too "

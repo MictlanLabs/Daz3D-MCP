@@ -31,6 +31,12 @@ content_load(path=items[0].path, target="Ana")
 - Always `package_inspect` first and tell the user what is inside if it is not
   what they expect (wrong generation, only textures, Poser-only content,
   warnings).
+- `requires` lists the products the package needs that are not in any content
+  library: a base figure (`base_figure: true`, e.g. Genesis 8.1 Female), the
+  outfit a morph pack is for, or a body morph pack whose dials its presets set
+  (`morphs named BL...`; the package name or readme says which product). Tell
+  the user before installing: without them the items load with a "missing
+  files" dialog or do nothing.
 - `layout`:
   - `daz`: Daz Studio content. Load the `items` as usual.
   - `poser`: Poser format (`Runtime/libraries`, .pz2/.cr2). It loads in Daz,
@@ -87,9 +93,13 @@ import_mesh(path, label="Bedroom", scale=<suggested_scale if any>, drop_to_floor
 prop_surfaces(node="Bedroom")          -> floor at 0, bed / sofa / chair tops for furniture-poses
 ```
 
-- `room=true` stands the floor (the largest level surface) on Y = 0. Without
-  it `drop_to_floor` uses the lowest point, which in a set is often ground or
-  scenery under the floor.
+- `room=true` stands the floor on Y = 0: the largest level surface with
+  something over it (an upper floor, a ceiling, a roof) and room to stand on
+  it; of storeys about as big, the lowest. So a flat roof, a second storey, a
+  street around the building or the ground under the floor boards is not taken
+  for the floor (`floor.was_at_y`, `covered`,
+  `levels`). Without it `drop_to_floor` uses the lowest point, which in a set
+  is often ground or scenery under the floor.
 - For fit_check in a room, name the room in `against` when the figure is near
   other props; the figure's own toon outlines and held props are left out.
 - Tell the user that applying all transforms in Blender (Object > Apply > All

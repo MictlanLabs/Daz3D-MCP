@@ -70,6 +70,10 @@ frames only). It uses ffmpeg from PATH or the one Daz Studio ships.
 
 - **Too dark:** raise light `power` (lumens), add a fill light, or raise the
   dome `intensity`. Bright is easier to judge than dark.
+- **Interiors and night scenes:** Iray's default exposure (EV 13) is for
+  daylight. Lit rooms want `render_settings(exposure=7.5)` (7 to 9), night
+  less; lower is brighter. `exposure` sets the Shutter Speed Iray really uses
+  (setting "Exposure Value" alone by script would do nothing).
 - **Noisy/grainy:** more `max_time` or `max_samples`; small lights and dark
   scenes need more.
 - **Flat light:** move the key light to the side and above (45 degrees), lower

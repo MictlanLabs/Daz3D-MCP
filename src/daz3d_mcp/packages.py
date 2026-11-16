@@ -19,7 +19,9 @@ those) and keeps loose meshes aside for import_mesh.
 
 from __future__ import annotations
 
+import gzip
 import hashlib
+import io
 import json
 import os
 import re
@@ -30,6 +32,7 @@ import time
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
+from urllib.parse import unquote
 
 from daz3d_mcp.content import generation_of, kind_of, read_asset_type, thumbnail_of
 from daz3d_mcp.paths import config_dir
@@ -293,6 +296,198 @@ def summarize(plan: Plan, max_items: int = 60) -> dict:
     return out
 
 
+# ------------------------------------------------------- requirements --
+# Add-ons (morph packs, presets, characters) only work on top of another
+# product: a base figure, a body morph pack, an outfit. Their .duf/.dsf files
+# name the files of that product by library path; when none of the user's
+# libraries has them, Daz loads the add-on with "missing files" and it does
+# nothing. These are the base products every Genesis add-on points to.
+BASE_PRODUCTS = {
+    "data/daz 3d/genesis 9/base": "Genesis 9",
+    "data/daz 3d/genesis 8/female 8_1": "Genesis 8.1 Female",
+    "data/daz 3d/genesis 8/male 8_1": "Genesis 8.1 Male",
+    "data/daz 3d/genesis 8/female": "Genesis 8 Female",
+    "data/daz 3d/genesis 8/male": "Genesis 8 Male",
+    "data/daz 3d/genesis 3/female": "Genesis 3 Female",
+    "data/daz 3d/genesis 3/male": "Genesis 3 Male",
+    "data/daz 3d/genesis 2/female": "Genesis 2 Female",
+    "data/daz 3d/genesis 2/male": "Genesis 2 Male",
+}
+_REF = re.compile(rb'"(/(?:data|people|props|environments|runtime)/[^"#?]+?\.(?:dsf|duf))[#?"]', re.I)
+# Presets dial morphs by property name ("name://@selection#BL_Pointy:?value"),
+# not by file: the morph is a .dsf of that name in some library's data folder.
+# Only dials set away from zero count: presets and animations saved with every
+# dial the author had keep the ones they do not use at 0, and Daz skips those.
+_DIAL = re.compile(rb'"name://@selection#([^":/?]+):\?value/value"\s*,\s*"keys"\s*:\s*\[(.{0,400}?)\]\s*\}',
+                   re.I | re.S)
+# the value of each [time, value, (interpolation)] key
+_KEY_VALUE = re.compile(rb"\[\s*-?[\d.eE+-]+\s*,\s*(-?[\d.]+(?:[eE][+-]?\d+)?)")
+_ID = re.compile(rb'"id"\s*:\s*"([^"]+)"')
+MIN_DIAL_FAMILY = 3            # unknown morphs sharing a prefix before they are reported
+MAX_DIAL_FAMILIES = 5
+REF_SCAN_BYTES = 8 << 20      # read at most this much of one file
+REF_SCAN_FILES = 4000         # and at most this many files of a package
+
+
+def _read_text(entry: Entry) -> bytes:
+    with entry.open() as fh:  # type: ignore[operator]
+        data = fh.read(REF_SCAN_BYTES)
+    if data[:2] == b"\x1f\x8b":
+        try:
+            with gzip.GzipFile(fileobj=io.BytesIO(data)) as gz:
+                data = gz.read(REF_SCAN_BYTES)
+        except (OSError, EOFError):
+            return b""
+    return data
+
+
+def _product_of(rel: str) -> tuple[str, str]:
+    """(folder, name) of the product a library file belongs to."""
+    parts = rel.split("/")
+    low = [p.lower() for p in parts]
+    for key, name in BASE_PRODUCTS.items():
+        k = key.split("/")
+        if low[:len(k)] == k and (len(low) == len(k) + 1 or low[len(k)] != "morphs"):
+            return "/".join(parts[:len(k)]), name
+    if "morphs" in low:
+        # .../Morphs/<Vendor>/<Product>/file.dsf
+        i = low.index("morphs")
+        folder = parts[:min(i + 3, len(parts) - 1)]
+    else:
+        folder = parts[:min(4, len(parts) - 1)]
+    return "/".join(folder), folder[-1] if folder else rel
+
+
+def references(plan: Plan, dials: dict[str, dict] | None = None, ids: set[str] | None = None) -> dict[str, dict]:
+    """Library files the package's .duf/.dsf files point to: {lower path: {path, by}}.
+    dials collects the morph properties its presets set by name; ids the ids its files define."""
+    refs: dict[str, dict] = {}
+    scanned = 0
+    for e in plan.content:
+        if not e.path.lower().endswith((".duf", ".dsf")):
+            continue
+        if scanned >= REF_SCAN_FILES:
+            break
+        scanned += 1
+        try:
+            data = _read_text(e)
+        except OSError:
+            continue
+        for m in _REF.finditer(data):
+            rel = unquote(m.group(1).decode("utf-8", "replace")).lstrip("/")
+            key = rel.lower()
+            ref = refs.setdefault(key, {"path": rel, "by": []})
+            if len(ref["by"]) < 3 and e.path not in ref["by"]:
+                ref["by"].append(e.path)
+        if dials is not None:
+            for m in _DIAL.finditer(data):
+                # keys: [[time, value], ...]; every second number is a value
+                values = [float(v) for v in _KEY_VALUE.findall(m.group(2))]
+                if not any(abs(v) > 1e-4 for v in values):
+                    continue
+                name = unquote(m.group(1).decode("utf-8", "replace"))
+                dial = dials.setdefault(name.lower(), {"name": name, "by": []})
+                if len(dial["by"]) < 3 and e.path not in dial["by"]:
+                    dial["by"].append(e.path)
+        if ids is not None and e.path.lower().endswith(".dsf"):
+            ids.update(unquote(m.group(1).decode("utf-8", "replace")).lower() for m in _ID.finditer(data))
+    return refs
+
+
+def _morph_names(libraries: list[Path]) -> set[str]:
+    """Lower-case names of every .dsf in the libraries' data folders."""
+    names: set[str] = set()
+    for lib in libraries:
+        for dirpath, _dirs, files in os.walk(lib / "data"):
+            names.update(f[:-4].lower() for f in files if f.lower().endswith(".dsf"))
+    return names
+
+
+def _exists_in(libraries: list[Path], rel: str) -> bool:
+    for lib in libraries:
+        try:
+            if (lib / rel).is_file():
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def missing_requirements(plan: Plan, libraries: list[Path]) -> list[dict]:
+    """Products the package needs that neither the package nor the libraries have."""
+    shipped = {e.path.lower() for e in plan.content}
+    shipped_dirs = {str(PurePosixPath(p).parent) for p in shipped}
+    shipped_tops = {"/".join(p.split("/")[:4]) for p in shipped if not p.startswith("data/")}
+    products: dict[str, dict] = {}
+    dials: dict[str, dict] = {}
+    ids: set[str] = set()
+    for key, ref in references(plan, dials, ids).items():
+        if key in shipped:
+            continue
+        parent = PurePosixPath(key).parent
+        # A file of the package's own folder that it forgot, or a name with a
+        # slash in it ("Glans R/L.dsf"): not another product.
+        if str(parent) in shipped_dirs or str(parent.parent) in shipped_dirs:
+            continue
+        # A user-facing file (People/..., Props/...) in the package's own vendor folder.
+        if not key.startswith("data/") and "/".join(key.split("/")[:4]) in shipped_tops:
+            continue
+        if _exists_in(libraries, ref["path"]):
+            continue
+        folder, name = _product_of(ref["path"])
+        p = products.setdefault(folder.lower(), {"product": name, "folder": folder, "base_figure":
+                                                 folder.lower() in BASE_PRODUCTS, "missing_files": 0,
+                                                 "examples": [], "needed_by": []})
+        p["missing_files"] += 1
+        if len(p["examples"]) < 3:
+            p["examples"].append(ref["path"])
+        for by in ref["by"]:
+            if len(p["needed_by"]) < 3 and by not in p["needed_by"]:
+                p["needed_by"].append(by)
+    shipped_names = {PurePosixPath(p).stem for p in shipped if p.endswith(".dsf")}
+    unknown = [d for k, d in dials.items() if k not in shipped_names and k not in ids]
+    if unknown:
+        known = _morph_names(libraries)
+        groups: dict[str, dict] = {}
+        for d in unknown:
+            if d["name"].lower() in known:
+                continue
+            # The morphs of one product share a prefix ("BL_" for Breastacular).
+            prefix = re.split(r"[_\s-]", d["name"], maxsplit=1)[0]
+            p = groups.setdefault(prefix.lower(), {
+                "product": f"morphs named {prefix}...", "folder": None, "base_figure": False,
+                "missing_files": 0, "examples": [], "needed_by": [], "morphs": True})
+            p["missing_files"] += 1
+            if len(p["examples"]) < 3:
+                p["examples"].append(d["name"])
+            for by in d["by"]:
+                if len(p["needed_by"]) < 3 and by not in p["needed_by"]:
+                    p["needed_by"].append(by)
+        # A property name is not always its file name: a lone unknown dial is
+        # more likely that than a missing product, so only families count.
+        families = sorted((g for g in groups.values() if g["missing_files"] >= MIN_DIAL_FAMILY),
+                          key=lambda g: -g["missing_files"])
+        for g in families[:MAX_DIAL_FAMILIES]:
+            products["dials:" + g["product"].lower()] = g
+    return sorted(products.values(), key=lambda p: (not p["base_figure"], -p["missing_files"], p["folder"] or ""))
+
+
+def requirement_warnings(missing: list[dict]) -> list[str]:
+    out = []
+    for p in missing:
+        if p.get("morphs"):
+            out.append(f"Its presets set {p['missing_files']} morph(s) that are not installed, e.g. "
+                       f"{', '.join(p['examples'])}: they belong to another product (a body morph pack; the "
+                       "package name or readme usually says which). Install it first, or the presets do nothing.")
+            continue
+        what = "the base figure" if p["base_figure"] else "the product"
+        out.append(f"Needs {what} {p['product']!r} ({p['folder']}), which is not installed: "
+                   f"{p['missing_files']} file(s) it uses are missing, e.g. {p['examples'][0]}. "
+                   f"Install {p['product']} first, or its items load without effect or with a "
+                   "'missing files' dialog.")
+    return out
+
+
 # ------------------------------------------------------------ install --
 def _slug(name: str) -> str:
     s = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
@@ -332,12 +527,14 @@ def _copy(entry: Entry, dest: Path) -> None:
 
 
 def install(source: Path, library: Path, overwrite: bool = False, max_bytes: int = 0,
-            name: str | None = None) -> dict:
+            name: str | None = None, libraries: list[Path] | None = None) -> dict:
     """Installs a package. Returns the summary, what was written and the new items."""
     library = library.expanduser()
-    with tempfile.TemporaryDirectory(prefix="dazmcp-pkg-") as tmpdir:
+    # ignore_cleanup_errors: on Windows a nested .zip can still be open when it is removed
+    with tempfile.TemporaryDirectory(prefix="dazmcp-pkg-", ignore_cleanup_errors=True) as tmpdir:
         plan = plan_package(source, Path(tmpdir), max_bytes)
         summary = summarize(plan)
+        requires = missing_requirements(plan, list(libraries or []) + [library])
         if plan.layout == "unknown":
             raise PackageError("Nothing to install: " + " ".join(plan.warnings))
         slug = _slug(name or plan.name)
@@ -408,7 +605,8 @@ def install(source: Path, library: Path, overwrite: bool = False, max_bytes: int
         "items": items[:80],
         "items_total": len(items),
         "meshes": meshes,
-        "warnings": summary["warnings"],
+        "requires": requires,
+        "warnings": requirement_warnings(requires) + summary["warnings"],
     }
 
 

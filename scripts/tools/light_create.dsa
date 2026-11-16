@@ -7,7 +7,9 @@
 //   position     [x, y, z] cm
 //   look_at      node label or [x, y, z]
 //   rotation     [x, y, z] degrees, when there is no look_at
-//   power        lumens for spot/point lights (Iray default 1500), intensity for distant
+//   power        lumens for spot/point lights (Iray default 1500), intensity for distant.
+//                Spot and point lights are made in Photometric Mode, as from Daz's
+//                Create menu, or Iray would ignore their lumens.
 //   color        [r, g, b] 0..1 or "#rrggbb"
 //   spread_angle degrees, spot lights only
 //   properties   {label: value} any other light property
@@ -21,7 +23,7 @@ function dazmcpTool(args) {
 	else { throw DazMcp.fail("bad_args", "type must be spot, point or distant."); }
 	light.setLabel(args.label || (type.charAt(0).toUpperCase() + type.substring(1) + " Light"));
 	Scene.addNode(light);
-	var out = DazMcp.lightApply(light, args);
+	var out = DazMcp.lightApply(light, args, { created: true });
 	out.type = type;
 	return out;
 }
