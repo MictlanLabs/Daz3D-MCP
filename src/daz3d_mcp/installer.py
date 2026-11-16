@@ -223,6 +223,25 @@ def _claude_code() -> Client:
                   [_home() / ".claude" / "skills"], path)
 
 
+def _claude_desktop_config(support: Path) -> Path:
+    """Claude Desktop's config file.
+
+    Recent Windows builds (the Microsoft Store / MSIX package) keep it in
+    %LOCALAPPDATA%/Claude-Data/<package>/ and leave %APPDATA%/Claude almost empty.
+    """
+    legacy = support / "Claude" / "claude_desktop_config.json"
+    if sys.platform == "win32":
+        data = Path(os.environ.get("LOCALAPPDATA", _home() / "AppData" / "Local")) / "Claude-Data"
+        if data.is_dir():
+            files = sorted(data.glob("*/claude_desktop_config.json"), key=lambda f: f.stat().st_mtime, reverse=True)
+            if files:
+                return files[0]
+            folders = sorted(d for d in data.iterdir() if d.is_dir())
+            if folders and not legacy.is_file():
+                return folders[0] / "claude_desktop_config.json"
+    return legacy
+
+
 def all_clients() -> list[Client]:
     home = _home()
     support = _app_support()
@@ -249,7 +268,7 @@ def all_clients() -> list[Client]:
                    codex_configure, codex_unconfigure, codex_is_configured,
                    [home / ".agents" / "skills", codex_home / "skills"], codex_cfg)
 
-    claude_desktop_cfg = support / "Claude" / "claude_desktop_config.json"
+    claude_desktop_cfg = _claude_desktop_config(support)
 
     return [
         _claude_code(),

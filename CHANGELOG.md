@@ -12,6 +12,12 @@ noted below when it changes.
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-11-16
+
+### Fixed
+
+- `install` and `doctor` find Claude Desktop's settings in `%LOCALAPPDATA%\Claude-Data\<folder>\claude_desktop_config.json`, where recent Windows builds (the Microsoft Store app) keep them, instead of `%APPDATA%\Claude`.
+
 ## [1.0.1] - 2026-11-16
 
 ### Fixed
@@ -182,7 +188,8 @@ plugin on the GitHub release.
 - First MCP server, bridge plugin, scene tools, `setup`, `install` and `doctor`
   commands.
 
-[Unreleased]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/MictlanLabs/Daz3D-MCP/releases/tag/v1.0.0
 [0.6.0]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v0.5.1...v0.6.0

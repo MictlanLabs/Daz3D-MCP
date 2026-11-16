@@ -98,6 +98,8 @@ Every client runs the same command, `uvx daz3d-mcp`:
   { "mcpServers": { "daz3d": { "command": "uvx", "args": ["daz3d-mcp"] } } }
   ```
 
+- Claude Desktop keeps its file in `%LOCALAPPDATA%\Claude-Data\<folder>\claude_desktop_config.json`
+  (older versions: `%APPDATA%\Claude\claude_desktop_config.json`).
 - **VS Code** (`mcp.json`): the same entry under `"servers"`, with
   `"type": "stdio"`.
 

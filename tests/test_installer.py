@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,7 @@ def fake_home(tmp_path, monkeypatch) -> Path:
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("APPDATA", str(home / "AppData" / "Roaming"))
+    monkeypatch.setenv("LOCALAPPDATA", str(home / "AppData" / "Local"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
     monkeypatch.delenv("CODEX_HOME", raising=False)
     monkeypatch.setenv("PATH", str(tmp_path / "empty-bin"))  # no `claude` CLI: use the JSON fallback
@@ -105,3 +107,21 @@ def test_server_command_from_git(monkeypatch):
     monkeypatch.delenv("DAZ3D_MCP_SOURCE", raising=False)
     assert installer.server_command() == (
         "uvx", ["--from", "git+https://github.com/MictlanLabs/Daz3D-MCP@main", "daz3d-mcp"])
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Claude-Data is a Windows folder")
+def test_claude_desktop_store_app_config(fake_home):
+    # The Microsoft Store build keeps its config in %LOCALAPPDATA%\Claude-Data\<package>.
+    (fake_home / "AppData" / "Roaming" / "Claude").mkdir(parents=True)
+    store = fake_home / "AppData" / "Local" / "Claude-Data" / "claude_abc123"
+    store.mkdir(parents=True)
+    (store / "claude_desktop_config.json").write_text(json.dumps({"preferences": {"x": 1}}))
+
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main(["install", "--client", "claude-desktop"])
+    assert exit_info.value.code == 0
+
+    cfg = json.loads((store / "claude_desktop_config.json").read_text())
+    assert cfg["mcpServers"]["daz3d"]["args"] == ["daz3d-mcp"]
+    assert cfg["preferences"] == {"x": 1}
+    assert not (fake_home / "AppData" / "Roaming" / "Claude" / "claude_desktop_config.json").exists()
