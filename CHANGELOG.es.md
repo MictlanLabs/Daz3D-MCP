@@ -13,6 +13,12 @@ que se anota abajo cuando cambia.
 
 ## [Sin publicar]
 
+## [1.0.1] - 2026-11-16
+
+### Corregido
+
+- `setup` no copiaba el plugin después de que Windows daba el permiso de administrador cuando la carpeta de plugins de Daz Studio ya existía (siempre, en una instalación normal).
+
 ## [1.0.0] - 2026-11-16
 
 Primer lanzamiento público: en PyPI (`uvx daz3d-mcp`) con el plugin puente
@@ -190,7 +196,8 @@ compilado en el release de GitHub.
 - Primer servidor MCP, plugin puente, herramientas de escena y los comandos
   `setup`, `install` y `doctor`.
 
-[Sin publicar]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v1.0.0...HEAD
+[Sin publicar]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/MictlanLabs/Daz3D-MCP/releases/tag/v1.0.0
 [0.6.0]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/MictlanLabs/Daz3D-MCP/compare/v0.5.0...v0.5.1

@@ -71,7 +71,9 @@ def _copy_elevated(source: Path, target: Path, verb: str = "runas") -> bool:
 
     see_mask_nocloseprocess, sw_hide = 0x40, 0
     # Windows paths cannot contain double quotes, so quoting them is enough.
-    params = f'/d /c if not exist "{target.parent}" mkdir "{target.parent}" & copy /y "{source}" "{target}"'
+    # The parentheses matter: without them cmd runs `& copy` as part of the `if`, so nothing
+    # was copied when the folder already existed.
+    params = f'/d /c (if not exist "{target.parent}" mkdir "{target.parent}") & copy /y "{source}" "{target}"'
     info = ShellExecuteInfo(cbSize=ctypes.sizeof(ShellExecuteInfo), fMask=see_mask_nocloseprocess,
                             lpVerb=verb, lpFile="cmd.exe", lpParameters=params, nShow=sw_hide)
     shell32 = ctypes.windll.shell32

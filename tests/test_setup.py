@@ -62,3 +62,14 @@ def test_open_daz_with_plugin_installed_stops(plugin, monkeypatch):
     monkeypatch.setattr(cli, "_daz_running", lambda: True)
     assert _setup(source, plugins) == 1
     assert (plugins / "dsp_dazmcp_bridge.dll").read_bytes() == b"old"
+
+
+@pytest.mark.parametrize("existing", [True, False])
+def test_elevated_copy_command_copies(tmp_path, existing):
+    # "open" runs the same cmd line as "runas" without the UAC prompt.
+    source = tmp_path / "bridge.dll"
+    source.write_bytes(b"plugin")
+    folder = tmp_path / "plugins dir"
+    if existing:
+        folder.mkdir()
+    assert cli._copy_elevated(source, folder / "dsp_dazmcp_bridge.dll", verb="open")
