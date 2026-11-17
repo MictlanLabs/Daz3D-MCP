@@ -342,6 +342,12 @@ breast shape, ear or anything else the user can describe better with a brush:
    well it lined up, it is saved in the library and worn items follow it. Put
    it in a sheet with `dials={"MCP Hooked Nose": 0.8}`.
 
+Checked with Blender 5.3: its OBJ importer keeps the mesh Y up and stands the
+object up with a 90 degree rotation, and the exporter with default settings
+undoes it, so the defaults are right. Without a Blender MCP, Blender can also
+run headless: `blender --background --python script.py -- in.obj out.obj` with
+a script that imports, edits `obj.data.vertices` and exports with
+`bpy.ops.wm.obj_export(export_selected_objects=True, apply_modifiers=False)`.
 ZBrush or any modeler works the same way through OBJ.
 
 ## 5. What the result says
