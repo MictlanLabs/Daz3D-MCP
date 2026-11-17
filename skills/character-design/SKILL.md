@@ -287,37 +287,47 @@ expect before promising a look:
 | Approximated | `bust` (chest scale), `nose_width` (nostrils), `eyes_size` (eyeball only), `fangs` / `fangs_lower` (toon canines) | `bust`, `head_size`, hands, feet (scales), `height` (figure scale) |
 | Missing | `weight`, `muscle`, `age`, `wrinkles`, waist, hips, belly, thighs, nose size, length, bridge, hump, tip, jaw width and definition, chin, ears size and shape, forehead, temples, philtrum, dimples, `bite` | almost every face trait |
 
-`morph_generate` (section 4b) adds weight, nose width, jaw width and jaw
-definition to Genesis 9. The full Head and Body Morphs packs turn most
-"missing" lines into "works"; the
+`morph_generate` (section 4b) makes 20 of the missing dials on Genesis 9 and
+on Genesis 8 / 8.1 (weight, muscle, belly, age, nose size, length, bridge,
+tip, chin, jaw, cheekbones, temples, eye bags, philtrum, lips, ears). The full
+Head and Body Morphs packs turn most "missing" lines into "works"; the
 traits stay in the sheet, so `character_update(name, refresh=true)` applies
 them once the packs are installed. An elf on starter content is easier on
 Genesis 8.1 Female (Ears Elf Long).
 
 ## 4b. Making the missing dials
 
-`morph_generate(figure)` lists the dials it can make for this generation
-(today on Genesis 9: `nose_width`, `jaw_width`, `jaw_definition`, `weight`);
-`morph_generate(figure, traits=[...])` makes them from the figure's own mesh
-and face and body bone weights, labels them "MCP <name>" (group Daz3D-MCP),
-saves them in Daz's first content library
-(`data/Daz 3D/Genesis 9/Base/Morphs/Daz3D-MCP/Generated`), so every new figure
-of that generation has them, and makes what the figure wears (clothing, hair,
-brows, lashes, eyes, mouth) follow them. Do it once per install, before
-`character_create`; traits then find the new dials (`how: "found"`).
+`morph_generate(figure)` lists the dials it can make for that figure. On
+Genesis 9 and Genesis 8 / 8.1 (Female and Male): `nose_width`, `nose_size`,
+`nose_length`, `nose_bridge`, `nose_tip_up`, `philtrum`, `temples`, `eye_bags`,
+`cheekbones`, `chin_length`, `chin_forward`, `jaw_width`, `jaw_definition`,
+`lips_fullness`, `ears_size`, `ears_out`, `age` (eye bags, sagging lower
+cheeks, hollow temples, lower brows and mouth corners, thinner lips), `weight`,
+`muscle` (bulk on arms, shoulders, chest and legs, a slimmer waist) and
+`belly`. `morph_generate(figure, traits=[...])` makes them from the figure's
+own mesh, its face and body bone weights and points found on the face (nose
+tip, outer brow, ears), labels them "MCP <name>" (group Daz3D-MCP), saves them
+in Daz's first content library (`data/<figure>/Morphs/Daz3D-MCP/Generated`),
+so every new figure of that generation has them, and makes what the figure
+wears (clothing, hair, brows, lashes, eyes, mouth) follow them. Do it once per
+install and generation, before `character_create`; traits then find the new
+dials (`how: "generated"`).
 
 - Ask the user before making them the first time: they are written into their
   Daz library. `save=false` keeps them in the scene only.
 - They are simpler than Daz's own morph packs: keep them at 0.6 or less and
-  check a render (section 8). A dial from an installed pack wins over an MCP
-  dial with the same meaning.
+  check a render (section 8). At 1 each moves the skin about as far as a
+  clear but natural change (0.2-0.7 cm on the face, a few cm for weight and
+  belly). A dial from an installed pack, and the paired Genesis 9 asymmetry
+  dials, win over an MCP dial with the same meaning; an MCP dial wins over an
+  approximated substitute.
 - Items loaded later follow them after `character_load` / `character_update`
   (the `follow` step) or `morph_generate(figure, traits=[...], save=false)`.
 
 ## 5. What the result says
 
 - `traits`: each trait, the dials it set and how: `dial` / `found` (a dial made
-  for it), `pair` (the Genesis 9 left and right asymmetry dials set together,
+  for it), `generated` (an "MCP" dial from `morph_generate`), `pair` (the Genesis 9 left and right asymmetry dials set together,
   so both sides change evenly), `scale` (no height dial: the figure was
   scaled), `base figure` (`feminine` on a Female figure). `approximated: true`
   marks a near substitute: tell the user.

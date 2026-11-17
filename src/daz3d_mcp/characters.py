@@ -39,7 +39,7 @@ NOT_SKIN = re.compile(r"eye|iris|pupil|sclera|cornea|lacrimal|tear|moisture|teet
 
 MISSING_HINT = ("Dials that are not installed cannot be set. More shape dials come with Daz's base morph packs "
                 "(Genesis 9 Head and Body Morphs; Genesis 8 / 8.1 Female or Male Head and Body Morphs). "
-                "Meanwhile, morph_generate(figure) makes some of them (nose width, jaw, weight) on Genesis 9, "
+                "Meanwhile, morph_generate(figure) makes 20 of them (nose, chin, jaw, cheeks, ears, age, weight, muscle...) on Genesis 9 and 8 / 8.1, "
                 "and mixing the installed character heads and bodies at partial values in `dials` "
                 "(morph_list(figure, query=\"people\")) also gives a unique face and body.")
 
@@ -454,6 +454,10 @@ def _try_search(searchable: list[tuple[Dial, frozenset[str]]], s: Search, value:
     return hits[0], _amount(s.direction, value, s.gain)
 
 
+def is_generated(dial: Dial) -> bool:
+    return "daz3d-mcp" in dial.group.lower()
+
+
 def _is_pair(labels: tuple[str, ...]) -> bool:
     sides = {re.sub(r" (Left|Right)$", "", label) for label in labels}
     ends = all(label.endswith((" Left", " Right")) for label in labels)
@@ -462,7 +466,9 @@ def _is_pair(labels: tuple[str, ...]) -> bool:
 
 def resolve(traits: dict[str, float], inv: Inventory, generation: str | None) -> Resolution:
     res = Resolution()
-    searchable = inv.searchable()
+    everything = inv.searchable()
+    searchable = [(d, t) for d, t in everything if not is_generated(d)]
+    generated = [(d, t) for d, t in everything if is_generated(d)]
     for name, value in traits.items():
         trait = TRAITS.get(name)
         if trait is None or abs(value) < 1e-9:
@@ -483,10 +489,25 @@ def resolve(traits: dict[str, float], inv: Inventory, generation: str | None) ->
                     break
         if not picked:
             for opt in trait.fallback:
+                if opt.approx:
+                    continue
                 picked = _try_option(inv, opt, value)
                 if picked:
-                    how = "pair" if _is_pair(opt.dials) and not opt.approx else "dial"
-                    approx = opt.approx
+                    how = "pair" if _is_pair(opt.dials) else "dial"
+                    break
+        if not picked:
+            for s in trait.search:
+                hit = _try_search(generated, s, value)
+                if hit:
+                    picked, how = [hit], "generated"
+                    break
+        if not picked:
+            for opt in trait.fallback:
+                if not opt.approx:
+                    continue
+                picked = _try_option(inv, opt, value)
+                if picked:
+                    how, approx = "dial", True
                     break
         if picked:
             entry: dict = {"value": value, "how": how, "dials": {}}

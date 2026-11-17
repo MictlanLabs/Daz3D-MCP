@@ -88,7 +88,7 @@ def register(mcp: FastMCP, call: Call) -> Generator:
 
     @mcp.tool(annotations=CHANGES_SCENE)
     async def morph_generate(
-        figure: Annotated[str, Field(description="Figure label (Genesis 9).")],
+        figure: Annotated[str, Field(description="Figure label (Genesis 9 or 8 / 8.1).")],
         traits: Annotated[list[str] | None, Field(description="Traits to make dials for; omit to list what "
                                                               "can be made.")] = None,
         save: Annotated[bool, Field(description="Save the new dials in a content library, so every new "
@@ -98,7 +98,8 @@ def register(mcp: FastMCP, call: Call) -> Generator:
         follow: Annotated[bool, Field(description="Make the clothing, hair and other items the figure "
                                                   "wears follow the new dials.")] = True,
     ) -> dict:
-        """Makes new shape dials for traits that have no installed dial (nose width, jaw, weight...),
+        """Makes new shape dials for traits that have no installed dial (nose, chin, jaw, cheeks, ears,
+        age, weight, muscle...) on Genesis 9 and 8 / 8.1,
         built from the figure's own mesh and bone weights, labeled "MCP <trait>". Character tools then
         use them like any other dial. Without traits, lists what can be made."""
         info = await call("figure_info", {"figure": figure})

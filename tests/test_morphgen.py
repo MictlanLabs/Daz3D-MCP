@@ -55,9 +55,10 @@ def test_scale_is_symmetric(mesh):
 
 
 def test_inflate_follows_normals(mesh):
-    recipe = mg.Recipe("T", "T", "/T", "t", "", (mg.Op("inflate", {"l_nostril": 1.0, "r_nostril": 1.0},
+    recipe = mg.Recipe("T", "T", "/T", "t", "", (mg.Op("inflate", {"nostril": 1.0},
                                                        (1.0, 0.0, 0.0), smooth=0),), smooth=0)
     deltas = mg.build_deltas(mesh, recipe)
+    assert len(deltas) > 50
     for dx, dy, dz in deltas.values():
         assert abs(dz) == pytest.approx(1.0, abs=1e-3) and dx == pytest.approx(0) and dy == pytest.approx(0)
 
@@ -85,6 +86,22 @@ def test_generated_dials_are_found_by_traits():
     res = ch.resolve({"nose_width": 0.4, "weight": -0.3}, inv, "Genesis 9")
     assert res.traits["nose_width"]["dials"] == {"Bruno": {"MCP Nose Width": 0.4}}
     assert res.traits["weight"]["dials"] == {"Bruno": {"MCP Weight": -0.3}}
+    assert res.traits["weight"]["how"] == "generated"
+
+
+def test_daz_pairs_win_over_generated_dials_and_generated_over_substitutes():
+    figure = [{"label": f"Asymmetry Lip {p} Thickness {s}", "name": f"lip{p}{s}", "group": "/Actor/Head",
+               "min": -1, "max": 1} for p in ("Upper", "Lower") for s in ("Left", "Right")]
+    figure += [{"label": f"Asymmetry Nose Wing Size {s}", "name": f"nw{s}", "group": "/Actor/Head", "min": -1,
+                "max": 1} for s in ("Left", "Right")]
+    figure += [{"label": "MCP Lips Fullness", "name": "DazMcp_LipsFullness", "group": "/Actor/Head/Face/Daz3D-MCP",
+                "min": -1, "max": 1},
+               {"label": "MCP Nose Width", "name": "DazMcp_NoseWidth", "group": "/Actor/Head/Face/Nose/Daz3D-MCP",
+                "min": -1, "max": 1}]
+    res = ch.resolve({"lips_fullness": 0.4, "nose_width": 0.4}, ch.inventory_from({"figure": ("A", figure)}),
+                     "Genesis 9")
+    assert res.traits["lips_fullness"]["how"] == "pair"
+    assert res.traits["nose_width"]["how"] == "generated" and "approximated" not in res.traits["nose_width"]
     assert all(r.trait in ch.TRAITS for r in mg.RECIPES.values())
 
 
@@ -100,7 +117,7 @@ class FakeDaz:
         if tool == "figure_info":
             if args["figure"] == "Bruno":
                 return {"generation": "Genesis 9", "wearing": [{"label": "Shirt"}]}
-            return {"generation": "Genesis 8.1 Female", "wearing": []}
+            return {"generation": "Genesis 3 Female", "wearing": []}
         if tool == "morph_mesh":
             data = grid_mesh()
             if args.get("weights") is False:
@@ -140,6 +157,7 @@ def test_morph_generate_makes_saves_and_follows(tool):
     daz, run = tool
     listed = run("morph_generate", figure="Bruno")
     assert {a["trait"] for a in listed["available"]} == set(mg.RECIPES)
+    assert all(set(mg.ALL) == set(r.generations) for r in mg.RECIPES.values())
     out = run("morph_generate", figure="Bruno", traits=["nose_width", "weight"])
     assert [m["dial"] for m in out["made"]] == ["MCP Nose Width", "MCP Weight"]
     assert out["saved"]["morphs"] == ["DazMcp_NoseWidth", "DazMcp_Weight"]
@@ -152,8 +170,8 @@ def test_morph_generate_makes_saves_and_follows(tool):
 
 def test_morph_generate_refuses_other_generations_and_unknown_traits(tool):
     _, run = tool
-    with pytest.raises(ToolError, match="Genesis 9"):
-        run("morph_generate", figure="Bea", traits=["weight"])
+    with pytest.raises(ToolError, match="Genesis 3 Female"):
+        run("morph_generate", figure="Old", traits=["weight"])
     with pytest.raises(ToolError, match="No recipe"):
         run("morph_generate", figure="Bruno", traits=["horns"])
 
@@ -165,3 +183,42 @@ def test_character_tools_make_items_follow_generated_dials(tool):
     recipes = anyio.run(gen.in_use, "Bruno")
     assert [r.trait for r in recipes] == ["weight"]
     assert character_tools.FOLLOW_AFTER == {"shape", "hair", "clothing", "extras"}
+
+
+def test_every_region_names_bones_for_both_generations():
+    used = {name for r in mg.RECIPES.values() for op in r.ops for name in op.bones}
+    assert used <= set(mg.CANON)
+    for name in used:
+        assert set(mg.CANON[name]) == {"g9", "g8"}
+    assert mg.gen_key("Genesis 9") == "g9" and mg.gen_key("Genesis 8.1 Female") == "g8"
+
+
+def test_genesis_8_mesh_uses_its_own_bone_names(tmp_path):
+    data = grid_mesh()
+    data["generation"] = "Genesis 8.1 Female"
+    data["weights"] = {"lNostril": data["weights"]["l_nostril"], "rNostril": data["weights"]["r_nostril"]}
+    path = tmp_path / "g8.json"
+    path.write_text(json.dumps(data))
+    mesh = mg.Mesh.load(path)
+    assert mesh.key == "g8"
+    assert mg.build_deltas(mesh, mg.RECIPES["nose_width"])
+
+
+def test_peak_sets_the_strongest_move(mesh):
+    deltas = mg.build_deltas(mesh, mg.RECIPES["nose_width"])
+    top = max(sum(c * c for c in d) ** 0.5 for d in deltas.values())
+    assert top == pytest.approx(mg.RECIPES["nose_width"].peak, rel=1e-3)
+
+
+def test_spheres_find_the_nose_tip(tmp_path):
+    data = grid_mesh()
+    verts = data["vertices"]
+    mid = (len(verts) // 3) // 2
+    verts[mid * 3 + 2] = 2.0
+    data["weights"]["head"] = [i for v in range(len(verts) // 3) for i in (v, 1.0)]
+    path = tmp_path / "m.json"
+    path.write_text(json.dumps(data))
+    mesh = mg.Mesh.load(path)
+    assert mesh.landmarks["nose_tip"][2] == 2.0
+    region = mesh.sphere(mg.Sphere("nose_tip", (0.0, 0.0, 0.0), (1.5, 1.5, 3.0)))
+    assert region[mid] == pytest.approx(1.0) and len(region) < 15
