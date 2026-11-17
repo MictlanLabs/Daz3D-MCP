@@ -15,6 +15,7 @@ que se anota abajo cuando cambia.
 
 ### Añadido
 
+- `contact_bake`: la mano de la propia figura que presiona un pecho lo deforma de verdad. En cada fotograma mide dónde entran la palma y cada dedo en la malla posada, empuja la piel hasta la superficie de la mano, abulta el tejido alrededor y añade inercia de resorte (retraso, rebote al soltar y asentamiento), horneado como un morph por fotograma.
 - Dials de contacto para animación: `morph_generate` crea `bust_press_left` / `bust_press_right` ("MCP Bust Press Left/Right") en Genesis 9 y 8 / 8.1, un hundimiento bajo la palma que presiona con el tejido de alrededor abultándose, para animarlos sincronizados con una mano. No son rasgos de personaje, así que las fichas de personaje no los usan.
 
 ## [1.1.0] - 2026-11-16

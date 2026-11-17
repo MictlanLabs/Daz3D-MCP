@@ -1,0 +1,49 @@
+// Makes one morph per frame from a file of per-frame offsets and keys each to 1 on its own frame
+// and 0 on the frames next to it, so the figure shows exactly that frame's shape.
+function dazmcpTool(args) {
+	var fig = DazMcp.requireFigure(args.figure);
+	var obj = fig.getObject();
+	var prefix = String(args.prefix);
+	if (!/^[A-Za-z0-9_]+$/.test(prefix)) { throw DazMcp.fail("bad_args", "prefix: letters, digits and _ only."); }
+	var i, k, mod, removed = 0;
+	for (i = obj.getNumModifiers() - 1; i >= 0; i--) {
+		mod = obj.getModifier(i);
+		if (DazMcp.inherits(mod, "DzMorph") && String(mod.getName()).indexOf(prefix) === 0) {
+			obj.removeModifier(mod);
+			removed++;
+		}
+	}
+	if (args.remove_only) { return { figure: fig.getLabel(), removed: removed }; }
+	var file = new DzFile(args.path);
+	if (!file.open(DzFile.ReadOnly)) { throw DazMcp.fail("not_found", "Cannot read " + args.path); }
+	var data = DazMcp.fromJson(String(file.read()));
+	file.close();
+	var n = obj.getCurrentShape().getGeometry().getNumVertices();
+	var step = Scene.getTimeStep();
+	var made = 0, deltas = 0;
+	for (k = 0; k < data.frames.length; k++) {
+		var flat = data.offsets[k];
+		if (!flat || flat.length < 4) { continue; }
+		var fr = data.frames[k];
+		var morph = new DzMorph();
+		var name = prefix + ("0000" + fr).slice(-4);
+		morph.setName(name);
+		morph.setLabel(name);
+		var d = morph.getDeltas();
+		try { d.setVertCount(n); } catch (e) { DazMcp.log("setVertCount: " + e); }
+		for (i = 0; i + 3 < flat.length; i += 4) {
+			d.addDelta(flat[i], new DzVec3(flat[i + 1], flat[i + 2], flat[i + 3]));
+			deltas++;
+		}
+		obj.addModifier(morph);
+		var vc = morph.getValueControl();
+		vc.setLabel(name);
+		try { vc.setPath(args.group || "/Actor/Daz3D-MCP/Contact"); } catch (e2) { DazMcp.log("setPath: " + e2); }
+		try { vc.setMinMax(0, 1); } catch (e3) { DazMcp.log("setMinMax: " + e3); }
+		if (fr > 0) { vc.setValue(step * (fr - 1), 0); }
+		vc.setValue(step * fr, 1);
+		vc.setValue(step * (fr + 1), 0);
+		made++;
+	}
+	return { figure: fig.getLabel(), morphs: made, deltas: deltas, prefix: prefix, removed: removed };
+}

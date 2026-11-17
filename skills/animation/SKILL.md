@@ -151,6 +151,27 @@ anim_preview()
 - Combine motions in time: one animation from frame 0 to 60, the next from 60
   (`start_frame=60`), keys around the joint to smooth it.
 
+## A hand pressing soft flesh
+
+Daz does not deform a body where a hand touches it: the fingers just pass
+through. `contact_bake(figure, region="breast_left", hand="right")` fixes that
+after the hand is animated:
+
+1. Key the hand so the palm and fingertips go a few millimetres to 2 cm into
+   the flesh at the press (deeper reads as a hard grab). Keep the fingers on
+   the soft part: fingertips on the collarbone or ribs stay inside them.
+2. `contact_bake` measures, frame by frame, where the hand enters, pushes the
+   skin back to the hand's surface (each finger leaves its own groove), lets
+   the flesh beside it bulge, and adds inertia: the flesh lags, springs past
+   its shape when the hand lets go and settles in about half a second.
+   `stiffness` and `damping` set how firm and how wobbly; `sag` how much the
+   breast drops under the press.
+3. It makes one hidden morph per frame (`DazMcp_Contact_####`). Bake again
+   after any change to the hand keys or the figure's shape;
+   `remove=true` takes them away. Render whole frames only.
+
+Only the figure's own hand and the breasts for now.
+
 ## Rendering an animation
 
 `anim_preview` shows the viewport. To render the animation with Iray use

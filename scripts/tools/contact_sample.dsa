@@ -1,0 +1,43 @@
+// Writes the posed positions of the given base vertices at each given frame, as Daz shows the
+// figure there (pose, shape and morphs applied). Earlier contact morphs (names starting with
+// args.remove_prefix) are removed first, so the sample sees the body before any contact.
+function dazmcpTool(args) {
+	var fig = DazMcp.requireFigure(args.figure);
+	var obj = fig.getObject();
+	var removed = 0;
+	var i, k, mod;
+	var prefix = String(args.remove_prefix || "");
+	if (prefix) {
+		for (i = obj.getNumModifiers() - 1; i >= 0; i--) {
+			mod = obj.getModifier(i);
+			if (DazMcp.inherits(mod, "DzMorph") && String(mod.getName()).indexOf(prefix) === 0) {
+				obj.removeModifier(mod);
+				removed++;
+			}
+		}
+	}
+	var idx = args.vertices;
+	var frames = args.frames;
+	var step = Scene.getTimeStep();
+	var keep = Scene.getTime();
+	var lines = [];
+	for (k = 0; k < frames.length; k++) {
+		Scene.setTime(step * frames[k]);
+		obj.forceCacheUpdate(fig, false);
+		var g = obj.getCachedGeom();
+		var row = [];
+		for (i = 0; i < idx.length; i++) {
+			var v = g.getVertex(idx[i]);
+			row.push(DazMcp.round(v.x, 4) + "," + DazMcp.round(v.y, 4) + "," + DazMcp.round(v.z, 4));
+		}
+		lines.push("[" + row.join(",") + "]");
+	}
+	Scene.setTime(keep);
+	var file = new DzFile(args.path);
+	if (!file.open(DzFile.WriteOnly)) { throw DazMcp.fail("save_failed", "Cannot write " + args.path); }
+	file.write("{\"frames\":" + DazMcp.toJson(frames) + ",\"positions\":[" + lines.join(",") + "]}");
+	file.close();
+	var scale = 1;
+	try { scale = fig.getScaleControl().getValue(); } catch (e) { DazMcp.log("scale: " + e); }
+	return { path: args.path, frames: frames.length, vertices: idx.length, removed: removed, scale: scale };
+}

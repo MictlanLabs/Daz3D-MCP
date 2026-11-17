@@ -13,7 +13,16 @@ from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from daz3d_mcp import __version__, anim_tools, asset_tools, character_tools, cull_tools, morph_tools, scene_tools
+from daz3d_mcp import (
+    __version__,
+    anim_tools,
+    asset_tools,
+    character_tools,
+    contact_tools,
+    cull_tools,
+    morph_tools,
+    scene_tools,
+)
 from daz3d_mcp.client import DazClient
 from daz3d_mcp.paths import config_dir
 from daz3d_mcp.skills import get_skill, list_skills
@@ -55,7 +64,8 @@ Animation: anim_keys_set keys poses at frames (anim_timeline sets the frame
 rate and range); anim_preset_apply plays saved or built-in motions;
 anim_import brings Mixamo FBX or mocap BVH onto a Genesis figure; anim_retime
 and anim_offset change speed, timing and place; anim_foot_contact and
-anim_preview check the result.
+anim_preview check the result. contact_bake makes a figure's hand pressing a
+breast dent the flesh frame by frame, with inertia.
 If your client has no skills, read the guides with daz_guide first: daz-basics,
 then scene-building, characters, character-design, faces, furniture-poses,
 dialogue-scenes, rendering, render-culling, cross-generation-clothing,
@@ -286,6 +296,7 @@ def create_server(client: DazClient | None = None) -> FastMCP:
     asset_tools.register(mcp, call, get_client, content.forget)
     anim_tools.register(mcp, call, get_client)
     morphs = morph_tools.register(mcp, call)
+    contact_tools.register(mcp, call, morphs)
     character_tools.register(mcp, call, get_client, content, morphs)
 
     for skill in list_skills():
