@@ -249,11 +249,14 @@ configuración, el token y el índice de contenido.
 | `render` | Renderiza a un archivo y devuelve la imagen |
 | `render_shots` | Renderiza una conversación como serie de planos (caras, miradas y cámara por línea) para novelas visuales |
 | `render_cull` | Deja fuera del render lo que la cámara no ve (fuera de cuadro, detrás de ella, ropa bajo otra ropa) y conserva lo que aún afecta a la luz; `cull=true` en `render`, `render_shots` y `render_animation` lo hace por plano |
+| `surface_realism` | Quita el aspecto de plástico: la piel con dos capas de brillo encimadas queda con una sola suave (natural, mate, grasosa), y los props importados de FBX/OBJ reciben materiales Iray Uber con el acabado que sugiere el nombre de cada superficie (piel, tela, plástico, cromo, pintura de auto, goma, vidrio, madera, metal) |
+| `light_rig` | Esquemas de luz fotográficos colocados desde la cámara: `low_key` (retrato sobre negro: luz principal lateral, contraluces frío y cálido), `soft_studio`, `window` (interiores), `neon`; ajusta fondo y exposición y reemplaza el esquema anterior |
+| `render_postwork` | Acabado de película para un render terminado con ffmpeg (Daz trae uno): curva de tono, separación de tonos, contraste local, nitidez, grano, viñeta y fondo detrás de los píxeles transparentes; también `render(postwork=...)` |
 | `render_animation` | Renderiza cada cuadro de la animación y los une en un MP4 o GIF |
 | `run_script` | Ejecuta DazScript para todo lo demás (se puede desactivar) |
 | `daz_guide` | Devuelve las skills como texto para agentes sin soporte de skills |
 
-Skills: `daz-basics`, `scene-building`, `characters`, `faces`, `furniture-poses`, `character-design`, `dialogue-scenes`, `rendering`, `render-culling`, `cross-generation-clothing`, `third-party-assets`, `animation`.
+Skills: `daz-basics`, `scene-building`, `characters`, `faces`, `furniture-poses`, `character-design`, `dialogue-scenes`, `rendering`, `realistic-renders`, `render-culling`, `cross-generation-clothing`, `third-party-assets`, `animation`.
 
 Pruébalo: *"Abre ~/Documents/escena.duf en Daz, describe la escena y muéstrame una captura."*
 O: *"Monta una escena con dos personajes Genesis 9, vestidos y posados,

@@ -83,3 +83,6 @@ frames only). It uses ffmpeg from PATH or the one Daz Studio ships.
   `max_time`, fewer lights, and leave out what the camera does not see:
   `render(..., cull=true)` (see `render-culling`).
 - **The render failed:** check the folder exists and that Daz shows no dialog.
+- **It looks plastic, fake or like a video game:** shiny skin, flat light and a
+  clean digital image; follow `realistic-renders` (`surface_realism`,
+  `light_rig`, `render_postwork`).

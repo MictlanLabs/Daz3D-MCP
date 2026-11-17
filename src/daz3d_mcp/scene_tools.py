@@ -18,7 +18,8 @@ from pydantic import BaseModel, Field
 
 from daz3d_mcp.client import DazClient
 from daz3d_mcp.content import KINDS, ContentIndex, thumbnail_of
-from daz3d_mcp import cull_tools, refit, video
+from daz3d_mcp import cull_tools, look_tools, refit, video
+from daz3d_mcp import postwork as postwork_mod
 from daz3d_mcp.paths import config_dir
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
@@ -804,6 +805,12 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient],
         cull: Annotated[bool, Field(description="Leave out what this camera cannot see (render_cull) for "
                                                 "this render only; everything is put back after.")] = False,
         cull_keep: Annotated[list[str] | None, Field(description="With cull: labels never to leave out.")] = None,
+        postwork: Annotated[Literal["none", "film", "soft", "punchy", "neutral"],
+                            Field(description="Also write <name>-post.png with a photographic finish "
+                                              "(render_postwork); the raw render is kept.")] = "none",
+        postwork_background: Annotated[list[float] | str | None,
+                                       Field(description="With postwork: color behind transparent "
+                                                         "pixels; null keeps them transparent.")] = "#000000",
     ) -> list:
         """Renders the scene with the current renderer (Iray), waits until it is done and returns the
         image. Set max_time or max_samples so a test render does not run for long."""
@@ -832,6 +839,18 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient],
                                 timeout=settings.render_timeout)
         if culled:
             result["cull"] = cull_tools.summary(culled)
+        if postwork != "none" and result.get("path"):
+            raw = Path(result["path"])
+            post = await look_tools.run_postwork(get_client, raw, postwork_mod.default_output(raw), postwork, 1.0,
+                                                 postwork_background, None, None, None)
+            result["postwork"] = {"look": postwork, "path": post.as_posix()}
+            preview_post = captures / f"render-post-preview-{int(time.time() * 1000)}.png"
+            try:
+                await look_tools.run_postwork(get_client, Path(result.get("preview") or raw), preview_post,
+                                              postwork, 1.0, postwork_background, None, None, None)
+                result["preview"] = preview_post.as_posix()
+            except ToolError:
+                pass
         content: list = []
         shown = Path(result["preview"]) if result.get("preview") else Path(result["path"])
         if shown.is_file() and shown.stat().st_size <= PREVIEW_MAX_BYTES:

@@ -1,0 +1,173 @@
+// Tool: light_rig
+// Puts a photographic light setup around a subject, placed from the camera so
+// the key, rim and fill lights always land where a photographer would put them.
+// Lights are photometric spot lights with a rectangular soft-box shape; they are
+// labeled "Rig <role>" and a new rig replaces the previous one.
+//
+// args:
+//   subject      (string, required) figure (aimed at its head) or prop (aimed at its center)
+//   camera       (string) camera label; default the camera of the active viewport
+//   preset       "low_key" (default: black background, side key, two rim lights, almost no fill),
+//                "soft_studio" (big soft key, fill and hair light, light grey background),
+//                "window" (warm daylight from one side, cool fill; keeps the environment),
+//                "neon" (dim warm key, cyan and magenta rims, black background)
+//   side         "left" | "right" (default "left"): side of the picture the key light comes from
+//   power_scale  (number, default 1) multiplies every light
+//   background   "auto" (the preset's), "keep", or a color [r, g, b] 0..1 / "#rrggbb"
+//   solo         (bool, default true) switch off the other lights while this rig is on
+//
+// Each light: [role, azimuth (0 = from the camera, 90 = from the picture's right,
+// 180 = from behind), distance cm, height above the aim point cm, lumens, color,
+// width, height (0 = a plain spot), spread angle].
+var RIGS = {
+	low_key: {
+		ev: 10, env: "scene_only", backdrop: [0, 0, 0],
+		lights: [
+			["Key", -55, 190, 45, 5500, "#fff1e2", 100, 100, 60],
+			["Rim Cool", 140, 160, 40, 9500, "#dfe8ff", 30, 150, 60],
+			["Rim Warm", -140, 170, 25, 6000, "#ffe2c8", 30, 150, 60],
+			["Fill", 40, 200, -10, 350, "#ffffff", 120, 120, 70]
+		]
+	},
+	soft_studio: {
+		ev: 11, env: "dome_and_scene", env_intensity: 0.25, backdrop: [0.78, 0.8, 0.83],
+		lights: [
+			["Key", -40, 200, 50, 6500, "#fff4e8", 120, 120, 70],
+			["Fill", 45, 220, 10, 2200, "#ffffff", 140, 140, 70],
+			["Hair", 165, 150, 80, 3000, "#fff8f0", 40, 40, 50]
+		]
+	},
+	window: {
+		ev: null, env: null, backdrop: null,
+		lights: [
+			["Key", -75, 150, 30, 9000, "#ffd9b0", 90, 130, 60],
+			["Fill", 60, 220, 0, 900, "#d6e4ff", 140, 140, 70]
+		]
+	},
+	neon: {
+		ev: 10, env: "scene_only", backdrop: [0.015, 0.015, 0.025],
+		lights: [
+			["Key", -60, 180, 20, 2500, "#ff9a4a", 0, 0, 25],
+			["Rim Cyan", 130, 160, 30, 4000, "#2fd6ff", 30, 150, 60],
+			["Rim Magenta", -135, 170, 45, 4000, "#c23cff", 30, 150, 60]
+		]
+	}
+};
+
+var ENV_MODES = { dome_and_scene: 0, dome_only: 1, sun_sky: 2, scene_only: 3 };
+
+function activeCamera() {
+	try {
+		var vp = MainWindow.getViewportMgr().getActiveViewport().get3DViewport();
+		return vp.getCamera();
+	} catch (e) {
+		return null;
+	}
+}
+
+function aimPoint(node) {
+	var t = DazMcp.nodeType(node);
+	if (t === "figure" || t === "fitted_figure") {
+		var head = DazMcp.findBone(node, "head");
+		if (head) {
+			var p = head.getWSPos();
+			return new DzVec3(p.x, p.y + 6, p.z); // the head bone starts at the jaw; aim a bit higher
+		}
+	}
+	var box = node.getWSBoundingBox();
+	return new DzVec3((box.min.x + box.max.x) / 2, (box.min.y + box.max.y) / 2, (box.min.z + box.max.z) / 2);
+}
+
+function setEnvironment(rig) {
+	if (!rig.env) { return null; }
+	var mode = DazMcp.findRenderProp(["Environment Mode"]);
+	if (!mode && typeof DzEnvironmentNode !== "undefined") {
+		Scene.addNode(new DzEnvironmentNode());
+		mode = DazMcp.findRenderProp(["Environment Mode"]);
+	}
+	if (!mode) { return null; }
+	mode.setValue(ENV_MODES[rig.env]);
+	var draw = DazMcp.findRenderProp(["Draw Dome"]);
+	if (draw) { DazMcp.setPropValue(draw, false); }
+	if (rig.env_intensity !== undefined) {
+		var inten = DazMcp.findRenderProp(["Environment Intensity"]);
+		if (inten) { inten.setValue(rig.env_intensity); }
+	}
+	return rig.env;
+}
+
+function dazmcpTool(args) {
+	var subject = DazMcp.requireNode(args.subject, "subject");
+	var preset = args.preset || "low_key";
+	var rig = RIGS[preset];
+	if (!rig) { throw DazMcp.fail("bad_args", "preset must be low_key, soft_studio, window or neon."); }
+	var cam = args.camera ? DazMcp.requireNode(args.camera, "camera") : activeCamera();
+	if (!cam) { throw DazMcp.fail("bad_args", "No active camera: pass camera."); }
+	var scale = typeof args.power_scale === "number" && args.power_scale > 0 ? args.power_scale : 1;
+	var sideSign = args.side === "right" ? -1 : 1;
+
+	var H = aimPoint(subject);
+	var C = cam.getWSPos();
+	var fx = H.x - C.x, fz = H.z - C.z;
+	var len = Math.sqrt(fx * fx + fz * fz);
+	if (len < 1e-3) { fx = 0; fz = -1; len = 1; }
+	fx /= len; fz /= len;
+	// screen right of the camera, on the ground plane
+	var rx = -fz, rz = fx;
+
+	// the previous rig goes away
+	var all = Scene.getNodeList();
+	var removed = 0, i;
+	for (i = all.length - 1; i >= 0; i--) {
+		if (DazMcp.inherits(all[i], "DzLight") && String(all[i].getLabel()).indexOf("Rig ") === 0) {
+			Scene.removeNode(all[i]);
+			removed++;
+		}
+	}
+	var turnedOff = [];
+	if (args.solo !== false) {
+		all = Scene.getNodeList();
+		for (i = 0; i < all.length; i++) {
+			if (DazMcp.inherits(all[i], "DzLight") && all[i].isVisible()) {
+				all[i].setVisible(false);
+				turnedOff.push(all[i].getLabel());
+			}
+		}
+	}
+
+	var made = [];
+	for (i = 0; i < rig.lights.length; i++) {
+		var L = rig.lights[i];
+		var az = L[1] * sideSign * Math.PI / 180;
+		var dx = -fx * Math.cos(az) + rx * Math.sin(az);
+		var dz = -fz * Math.cos(az) + rz * Math.sin(az);
+		var pos = [H.x + dx * L[2], H.y + L[3], H.z + dz * L[2]];
+		var light = new DzSpotLight();
+		light.setLabel("Rig " + L[0]);
+		Scene.addNode(light);
+		var props = { "Spread Angle": L[8] };
+		if (L[6] > 0) { props["Light Geometry"] = "Rectangle"; props.Width = L[6]; props.Height = L[7]; }
+		var res = DazMcp.lightApply(light, { position: pos, look_at: [H.x, H.y, H.z], power: L[4] * scale,
+			color: L[5], properties: props }, { created: true });
+		made.push({ label: res.label, position: res.position, power: L[4] * scale, color: L[5] });
+	}
+
+	var out = { preset: preset, subject: subject.getLabel(), camera: cam.getLabel(),
+		aim: [DazMcp.round(H.x, 1), DazMcp.round(H.y, 1), DazMcp.round(H.z, 1)], lights: made,
+		replaced_rig_lights: removed, turned_off: turnedOff };
+
+	var bg = args.background === undefined || args.background === null ? "auto" : args.background;
+	if (bg !== "keep") {
+		var color = bg === "auto" ? rig.backdrop : bg;
+		if (color) {
+			var c = DazMcp.toColor(color);
+			Scene.getBackdrop().getBackgroundColorControl().setColorValue(c);
+			out.backdrop = DazMcp.colorToArray(c);
+		}
+		out.environment = setEnvironment(rig);
+	}
+	if (rig.ev !== null && DazMcp.applyExposure(rig.ev)) { out.exposure = DazMcp.exposureInfo(); }
+	out.note = "Rendered PNGs keep a transparent background where nothing is behind the subject; " +
+		"render_postwork(background=...) fills it.";
+	return out;
+}

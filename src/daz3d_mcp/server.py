@@ -20,6 +20,7 @@ from daz3d_mcp import (
     character_tools,
     contact_tools,
     cull_tools,
+    look_tools,
     morph_tools,
     scene_tools,
 )
@@ -57,6 +58,11 @@ pieces left unconverted and repairs shoes that ended up misplaced.
 Lighter renders: render_cull leaves out of the render what a camera cannot see
 (out of the picture, behind it, under other clothing); render, render_shots and
 render_animation do it per shot with cull=true.
+Realistic, not plastic: surface_realism fixes shiny skin (two specular layers)
+and gives imported props real materials; light_rig places a photographic key,
+rim and fill from the camera (low_key on black, soft_studio, window, neon);
+render_postwork (or render(postwork=...)) gives the image a film finish: tone
+curve, split toning, local contrast, sharpening, grain and vignette.
 Content from other stores: package_inspect and package_install put a .zip into
 a content library; import_mesh brings in loose OBJ/FBX models;
 wearable_from_mesh makes an imported garment follow a figure.
@@ -68,7 +74,7 @@ anim_preview check the result. contact_bake makes a figure's hand pressing a
 breast dent the flesh frame by frame, with inertia.
 If your client has no skills, read the guides with daz_guide first: daz-basics,
 then scene-building, characters, character-design, faces, furniture-poses,
-dialogue-scenes, rendering, render-culling, cross-generation-clothing,
+dialogue-scenes, rendering, realistic-renders, render-culling, cross-generation-clothing,
 third-party-assets and animation.
 run_script runs free DazScript (ES5 JavaScript) for anything the named tools
 do not cover; prefer the named tools when they exist.
@@ -298,6 +304,7 @@ def create_server(client: DazClient | None = None) -> FastMCP:
     morphs = morph_tools.register(mcp, call)
     contact_tools.register(mcp, call, morphs)
     character_tools.register(mcp, call, get_client, content, morphs)
+    look_tools.register(mcp, call, get_client)
 
     for skill in list_skills():
         _register_skill(mcp, skill.name, skill.description)
