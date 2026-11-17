@@ -13,6 +13,10 @@ que se anota abajo cuando cambia.
 
 ## [Sin publicar]
 
+### Añadido
+
+- Dials de contacto para animación: `morph_generate` crea `bust_press_left` / `bust_press_right` ("MCP Bust Press Left/Right") en Genesis 9 y 8 / 8.1, un hundimiento bajo la palma que presiona con el tejido de alrededor abultándose, para animarlos sincronizados con una mano. No son rasgos de personaje, así que las fichas de personaje no los usan.
+
 ## [1.1.0] - 2026-11-16
 
 ### Agregado

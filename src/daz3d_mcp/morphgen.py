@@ -87,6 +87,7 @@ class Sphere:
     offset: Vec
     radii: Vec
     mirror: bool = False
+    flip: bool = False
 
 
 @dataclass(frozen=True)
@@ -215,6 +216,8 @@ class Mesh:
         if base is None:
             return {}
         centers = [(base[0] + s.offset[0], base[1] + s.offset[1], base[2] + s.offset[2])]
+        if s.flip:
+            centers = [(-centers[0][0], centers[0][1], centers[0][2])]
         if s.mirror:
             centers.append((-centers[0][0], centers[0][1], centers[0][2]))
         out: dict[int, float] = {}
@@ -403,7 +406,8 @@ PEAKS = {"nose_width": 0.5, "nose_size": 0.45, "nose_length": 0.45, "nose_bridge
          "philtrum": 0.35, "temples": 0.35, "eye_bags": 0.22, "cheekbones": 0.35, "chin_length": 0.45,
          "chin_forward": 0.45, "jaw_width": 0.6, "jaw_definition": 0.4, "lips_fullness": 0.3, "ears_size": 0.55,
          "ears_out": 0.7, "age": 0.45, "weight": 4.0, "muscle": 1.0, "belly": 3.0, "bust": 3.2,
-         "breast_shape": 1.8, "areola_size": 0.45, "nipple_projection": 0.4}
+         "breast_shape": 1.8, "areola_size": 0.45, "nipple_projection": 0.4, "bust_press_left": 1.8,
+         "bust_press_right": 1.8}
 
 
 def _r(name: str, label: str, group: str, trait: str, plus: str, *ops: Op, smooth: int = 3) -> Recipe:
@@ -492,6 +496,23 @@ RECIPES: dict[str, Recipe] = {r.trait: r for r in [
        smooth=4),
 ]}
 
+
+# Contact dials: shapes keyed over time while a hand or object touches the body (animation), not
+# character traits. A hand pressing the breast: a flattened dent under the palm, the flesh around it
+# bulging and pushed out and up.
+CONTACT: dict[str, Recipe] = {r.trait: r for r in (
+    _r(f"DazMcp_BustPress{side.title()}", f"MCP Bust Press {side.title()}", CHEST_GROUP, f"bust_press_{side}",
+       f"a hand presses the {side} breast in, the flesh around bulges out",
+       Op("move", amount=(0.0, 0.0, -1.0),
+          sphere=Sphere("nipple", (-0.2, -1.2, 0.5), (4.2, 4.2, 5.0), flip=k < 0), smooth=3),
+       Op("inflate", amount=(0.35, 0.0, 0.0),
+          sphere=Sphere("nipple", (-0.2, -0.8, -1.5), (6.0, 7.0, 7.0), flip=k < 0), smooth=3),
+       Op("move", amount=(0.3 * k, 0.15, 0.0),
+          sphere=Sphere("nipple", (0.0, 0.0, -1.0), (6.5, 6.5, 6.5), flip=k < 0), smooth=3), smooth=3)
+    for side, k in (("left", 1.0), ("right", -1.0))
+)}
+
+ALL_RECIPES: dict[str, Recipe] = {**RECIPES, **CONTACT}
 
 UNITS = {"cm": 1.0, "m": 0.01, "mm": 10.0}
 

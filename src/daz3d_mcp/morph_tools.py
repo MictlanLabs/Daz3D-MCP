@@ -102,7 +102,7 @@ class Generator:
         res = await self.call("morph_list", {"node": figure, "query": "daz3d-mcp", "limit": 1000})
         morphs = res.get("morphs") or []
         names = {m.get("name") for m in morphs}
-        out = [r for r in mg.RECIPES.values() if r.name in names]
+        out = [r for r in mg.ALL_RECIPES.values() if r.name in names]
         known = {r.name for r in out}
         out += [mg.Recipe(str(m["name"]), str(m.get("label")), str(m.get("group")), "", "", ())
                 for m in morphs if m.get("name") not in known]
@@ -168,14 +168,14 @@ def register(mcp: FastMCP, call: Call) -> Generator:
         mesh and bone weights, labeled "MCP <trait>". Character tools then use them like any other
         dial. Without traits, lists what can be made."""
         info, generation = await figure_generation(figure)
-        available = [{"trait": r.trait, "dial": r.label, "plus": r.plus} for r in mg.RECIPES.values()
+        available = [{"trait": r.trait, "dial": r.label, "plus": r.plus} for r in mg.ALL_RECIPES.values()
                      if generation in r.generations]
         if not traits:
             return {"figure": figure, "generation": generation, "available": available}
-        unknown = [t for t in traits if t not in mg.RECIPES]
+        unknown = [t for t in traits if t not in mg.ALL_RECIPES]
         if unknown:
             raise ToolError(f"No recipe for {unknown}. Available: {[a['trait'] for a in available]}.")
-        recipes = [mg.RECIPES[t] for t in traits]
+        recipes = [mg.ALL_RECIPES[t] for t in traits]
         wrong = [r.trait for r in recipes if generation not in r.generations]
         if wrong:
             raise ToolError(f"{wrong} can only be made on {sorted({g for r in recipes for g in r.generations})}; "

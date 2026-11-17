@@ -4,6 +4,7 @@ morph_generate tool against a stand-in for Daz."""
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 import anyio
@@ -156,7 +157,7 @@ def tool(tmp_path, monkeypatch):
 def test_morph_generate_makes_saves_and_follows(tool):
     daz, run = tool
     listed = run("morph_generate", figure="Bruno")
-    assert {a["trait"] for a in listed["available"]} == set(mg.RECIPES)
+    assert {a["trait"] for a in listed["available"]} == set(mg.ALL_RECIPES)
     assert all(set(mg.ALL) == set(r.generations) for r in mg.RECIPES.values())
     out = run("morph_generate", figure="Bruno", traits=["nose_width", "weight"])
     assert [m["dial"] for m in out["made"]] == ["MCP Nose Width", "MCP Weight"]
@@ -253,3 +254,37 @@ def test_morph_import_tool_makes_a_dial_from_an_obj(tool, tmp_path):
     assert out["saved"]["morphs"] == ["DazMcp_HookedNose"]
     exported = run("morph_export", figure="Bruno", path=str(tmp_path / "out.obj"), units="cm")
     assert exported["vertices"] == 81 and (tmp_path / "out.obj").read_text().count("\nf ") == 64
+
+
+def test_bust_press_dents_one_side_only():
+    path = Path(__file__).parent / "_press_mesh.json"
+    verts, facets, pecs = [], [], []
+    n = 21
+    for j in range(n):
+        for i in range(n):
+            x, y = i - 10.0, j - 10.0
+            z = 8.0 - 0.05 * (min(abs(x - 6), abs(x + 6)) ** 2 + y * y)
+            verts += [x, y + 120.0, z]
+            if abs(x) > 1:
+                pecs += [j * n + i, 1.0]
+    for j in range(n - 1):
+        for i in range(n - 1):
+            a = j * n + i
+            facets += [a, a + n, a + n + 1, a + 1]
+    path.write_text(json.dumps({"generation": "Genesis 9", "vertices": verts, "facets": facets,
+                                "weights": {"l_pectoral": pecs[: len(pecs) // 2], "r_pectoral": pecs[len(pecs) // 2:]}}))
+    try:
+        mesh = mg.Mesh.load(path)
+        mesh.weights = {"l_pectoral": {i: 1.0 for i, v in enumerate(mesh.vertices) if v[0] > 1},
+                        "r_pectoral": {i: 1.0 for i, v in enumerate(mesh.vertices) if v[0] < -1}}
+        mesh.landmarks = mesh.find_landmarks()
+        assert "bust_press_left" in mg.ALL_RECIPES and "bust_press_left" not in mg.RECIPES
+        for side, sign in (("left", 1), ("right", -1)):
+            d = mg.build_deltas(mesh, mg.CONTACT[f"bust_press_{side}"])
+            deepest = min(d, key=lambda i: d[i][2])
+            assert d[deepest][2] < -0.5
+            assert mesh.vertices[deepest][0] * sign > 0
+            top = max(math.dist((0, 0, 0), v) for v in d.values())
+            assert top == pytest.approx(mg.PEAKS[f"bust_press_{side}"], rel=1e-3)
+    finally:
+        path.unlink(missing_ok=True)

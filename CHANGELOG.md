@@ -12,6 +12,10 @@ noted below when it changes.
 
 ## [Unreleased]
 
+### Added
+
+- Contact dials for animation: `morph_generate` makes `bust_press_left` / `bust_press_right` ("MCP Bust Press Left/Right") on Genesis 9 and 8 / 8.1, a dent under a pressing palm with the flesh around it bulging out, to key in sync with a hand. They are not character traits, so character sheets do not use them.
+
 ## [1.1.0] - 2026-11-16
 
 ### Added
