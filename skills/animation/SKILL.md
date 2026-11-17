@@ -158,8 +158,14 @@ through. `contact_bake(figure, region="breast_left", hand="right")` fixes that
 after the hand is animated:
 
 1. Key the hand so the palm and fingertips go a few millimetres to 2 cm into
-   the flesh at the press (deeper reads as a hard grab). Keep the fingers on
-   the soft part: fingertips on the collarbone or ribs stay inside them.
+   the flesh at the press (deeper reads as a hard grab). Keep the whole hand
+   on the soft part: the heel of the hand, the thumb root and fingertips that
+   reach the breastbone, collarbone or ribs stay inside them, since only the
+   breast gives way.
+   For a natural arm, keep the elbow low and close to the ribs, bend the
+   elbow (not the shoulder) to reach, turn the palm with the forearm twist and
+   leave the wrist almost straight; a big upper-arm twist or a raised
+   shoulder reads as a puppet.
 2. `contact_bake` measures, frame by frame, where the hand enters, pushes the
    skin back to the hand's surface (each finger leaves its own groove), lets
    the flesh beside it bulge, and adds inertia: the flesh lags, springs past

@@ -84,7 +84,7 @@ def test_flesh_lags_overshoots_and_settles(mesh):
     out = ct.simulate(mesh, soft, hand, seq, ct.Settings(sag=0.0, subd_boost=1.0))
     center = min(range(N * N), key=lambda i: math.dist(mesh.vertices[i], (5.0, 0.0, 0.0)))
     z = [f.get(center, (0.0, 0.0, 0.0))[2] for f in out]
-    assert z[9] == pytest.approx(-1.08, abs=0.05)
+    assert z[9] == pytest.approx(-1.0 - ct.Settings().gap, abs=0.05)
     assert max(z[10:25]) > 0.05, "released flesh springs past its rest shape"
     assert abs(z[-1]) < 0.02, "and settles"
 
@@ -155,3 +155,13 @@ def test_contact_bake_tool(tmp_path, monkeypatch):
     sample = next(a for t, a in daz.calls if t == "contact_sample")
     assert sample["remove_prefix"] == contact_tools.PREFIX and sample["frames"] == [0, 1, 2, 3]
     assert run(figure="Amala", region="breast_left", remove=True)["removed"] == 4
+
+
+def test_flesh_springing_back_never_ends_inside_the_hand(mesh):
+    soft = {i: 1.0 for i in range(N * N)}
+    hand = ct.hand_vertices(mesh, "right")
+    seq = [posed(mesh, d) for d in (0.0, 0.5, 1.0, 1.5, 1.5, 1.2, 0.8, 0.4, 0.0)]
+    out = ct.simulate(mesh, soft, hand, seq, ct.Settings(sag=0.0, subd_boost=1.0))
+    for pos, frame in zip(seq, out):
+        offsets = {i: list(frame.get(i, (0.0, 0.0, 0.0))) for i in soft}
+        assert not ct.resolve(mesh, soft, hand, pos, offsets, ct.Settings(gap=0.0), rounds=1)

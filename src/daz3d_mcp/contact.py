@@ -87,7 +87,7 @@ def posed_normals(mesh: Mesh, pos: dict[int, Vec], verts: list[int]) -> dict[int
 
 @dataclass
 class Settings:
-    gap: float = 0.08            # cm left between skin and hand
+    gap: float = 0.2             # cm left between skin and hand (SubD rounds dents toward it)
     reach: float = 4.0           # cm; nearest hand point farther than this is no contact
     spread: int = 5              # rounds the dent spreads into the flesh around it
     bulge: float = 0.35          # share of the pushed-in depth that comes back out around the dent
@@ -100,51 +100,67 @@ class Settings:
     subd_boost: float = 1.15     # SubD smooths cage moves; push the cage a little more
 
 
-def contact_targets(mesh: Mesh, soft: dict[int, float], hand: list[int], pos: dict[int, Vec],
-                    settings: Settings) -> tuple[dict[int, list[float]], set[int], float]:
-    """Where each soft vertex has to be this frame (world-space offsets), which ones touch the hand,
-    and how deep the press is."""
-    hand_n = posed_normals(mesh, pos, hand)
-    body_n = posed_normals(mesh, pos, list(soft))
-    # Only the side of the hand that faces the flesh counts: with a deep press the nearest hand
-    # point to a buried vertex can be on the back of the hand, which would read as outside.
-    facing = [0.0, 0.0, 0.0]
-    for i, s in soft.items():
-        for a in range(3):
-            facing[a] += body_n[i][a] * s
-    ln = math.sqrt(sum(v * v for v in facing)) or 1.0
-    facing = [v / ln for v in facing]
-    hand = [i for i in hand if sum(hand_n[i][a] * facing[a] for a in range(3)) < -0.15]
-    if not hand:
-        return {}, set(), 0.0
-    hand_pts = [pos[i] for i in hand]
-    grid = Grid(hand_pts, cell=1.0)
-    push: dict[int, list[float]] = {}
-    deepest = 0.0
-    for i, s in soft.items():
-        p = pos[i]
-        near = grid.nearest(p, 3, reach=3)
-        if not near or math.sqrt(near[0][0]) > settings.reach:
-            continue
+class HandSurface:
+    """The side of the hand that faces the flesh, to tell how deep a point is inside it. Only that
+    side counts: with a deep press the nearest hand point to a buried vertex can be on the back of
+    the hand, which would read as outside."""
+
+    def __init__(self, mesh: Mesh, pos: dict[int, Vec], hand: list[int], facing: Vec, reach: float):
+        normals = posed_normals(mesh, pos, hand)
+        self.verts = [i for i in hand if sum(normals[i][a] * facing[a] for a in range(3)) < -0.15]
+        self.points = [pos[i] for i in self.verts]
+        self.normals = [normals[i] for i in self.verts]
+        self.grid = Grid(self.points, cell=1.0) if self.points else None
+        self.reach = reach
+
+    def depth(self, p: Vec) -> tuple[float, list[float]] | None:
+        """How far p is inside the hand (negative: outside) and the direction that leads out."""
+        if self.grid is None:
+            return None
+        near = self.grid.nearest(p, 3, reach=3)
+        if not near or math.sqrt(near[0][0]) > self.reach:
+            return None
         total = 0.0
         h = [0.0, 0.0, 0.0]
         n = [0.0, 0.0, 0.0]
         for d2, k in near:
             w = 1.0 / (math.sqrt(d2) + 0.05)
             total += w
-            q = hand_pts[k]
-            m = hand_n[hand[k]]
             for a in range(3):
-                h[a] += q[a] * w
-                n[a] += m[a] * w
+                h[a] += self.points[k][a] * w
+                n[a] += self.normals[k][a] * w
         h = [v / total for v in h]
         ln = math.sqrt(sum(v * v for v in n)) or 1.0
         n = [v / ln for v in n]
-        depth = -sum((p[a] - h[a]) * n[a] for a in range(3))
-        if depth <= -settings.gap:
+        return -sum((p[a] - h[a]) * n[a] for a in range(3)), n
+
+
+def facing_of(mesh: Mesh, pos: dict[int, Vec], soft: dict[int, float]) -> tuple[Vec, dict[int, Vec]]:
+    body_n = posed_normals(mesh, pos, list(soft))
+    acc = [0.0, 0.0, 0.0]
+    for i, s in soft.items():
+        for a in range(3):
+            acc[a] += body_n[i][a] * s
+    ln = math.sqrt(sum(v * v for v in acc)) or 1.0
+    return (acc[0] / ln, acc[1] / ln, acc[2] / ln), body_n
+
+
+def contact_targets(mesh: Mesh, soft: dict[int, float], hand: list[int], pos: dict[int, Vec],
+                    settings: Settings) -> tuple[dict[int, list[float]], set[int], float]:
+    """Where each soft vertex has to be this frame (world-space offsets), which ones touch the hand,
+    and how deep the press is."""
+    facing, body_n = facing_of(mesh, pos, soft)
+    surface = HandSurface(mesh, pos, hand, facing, settings.reach)
+    if not surface.verts:
+        return {}, set(), 0.0
+    push: dict[int, list[float]] = {}
+    deepest = 0.0
+    for i, s in soft.items():
+        found = surface.depth(pos[i])
+        if found is None or found[0] <= -settings.gap:
             continue
-        move = (depth + settings.gap) * (0.35 + 0.65 * s)
-        push[i] = [n[a] * move for a in range(3)]
+        depth, n = found
+        push[i] = [n[a] * (depth + settings.gap) for a in range(3)]
         deepest = max(deepest, depth)
     touching = set(push)
     field = {i: list(v) for i, v in push.items()}
@@ -192,6 +208,32 @@ def geodesic(mesh: Mesh, pos: dict[int, Vec], start: set[int], limit: float) -> 
     return dist
 
 
+def resolve(mesh: Mesh, soft: dict[int, float], hand: list[int], pos: dict[int, Vec],
+            offsets: dict[int, list[float]], settings: Settings, rounds: int = 3) -> set[int]:
+    """Last pass of a frame: wherever the flesh, after the spring and the bulge, still sits inside
+    the hand, move it out to the hand's surface (in place) and say which vertices moved."""
+    facing, _ = facing_of(mesh, pos, soft)
+    surface = HandSurface(mesh, pos, hand, facing, settings.reach)
+    moved: set[int] = set()
+    for _ in range(rounds):
+        fixed = 0
+        for i in soft:
+            d = offsets.get(i, [0.0, 0.0, 0.0])
+            p = pos[i]
+            found = surface.depth((p[0] + d[0], p[1] + d[1], p[2] + d[2]))
+            if found is None or found[0] <= -settings.gap:
+                continue
+            depth, n = found
+            cur = offsets.setdefault(i, [0.0, 0.0, 0.0])
+            for a in range(3):
+                cur[a] += n[a] * (depth + settings.gap)
+            moved.add(i)
+            fixed += 1
+        if not fixed:
+            break
+    return moved
+
+
 def simulate(mesh: Mesh, soft: dict[int, float], hand: list[int], frames: list[dict[int, Vec]],
              settings: Settings | None = None, scale: float = 1.0) -> list[dict[int, Vec]]:
     """Per-frame offsets (object space, cm) for the soft vertices: contact as a hard constraint,
@@ -223,6 +265,10 @@ def simulate(mesh: Mesh, soft: dict[int, float], hand: list[int], frames: list[d
             for a in range(3):
                 vel[a] += settings.stiffness * (t[a] - cur[a]) - settings.damping * vel[a]
                 cur[a] += vel[a]
+        # Spring and bulge can carry flesh back into the hand: put it on the hand's surface.
+        moved = resolve(mesh, soft, hand, pos, x, settings)
+        for i in moved:
+            v[i] = [0.0, 0.0, 0.0]
         frame_sag = sag
         sag_v += settings.sag_stiffness * (-settings.sag * deepest - sag) - settings.sag_damping * sag_v
         sag += sag_v
