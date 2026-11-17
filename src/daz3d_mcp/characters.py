@@ -17,8 +17,9 @@ from daz3d_mcp.paths import config_dir
 SHEET_FORMAT = "daz3d-mcp-character"
 SHEET_VERSION = 1
 
-Role = Literal["figure", "mouth", "eyes"]
-ROLES: tuple[Role, ...] = ("figure", "mouth", "eyes")
+Role = Literal["figure", "mouth", "eyes", "anatomy"]
+ROLES: tuple[Role, ...] = ("figure", "mouth", "eyes", "anatomy")
+ANATOMY = re.compile(r"anatomical|genital|\bgens?\b|graft", re.IGNORECASE)
 Direction = Literal["both", "up", "down"]
 
 BASE_FIGURES = {
@@ -31,7 +32,7 @@ BASE_FIGURES = {
 
 FILLER = {"body", "full", "size", "proportion", "fbm", "pbm", "phm", "ctrl", "bs", "scale", "mcp"}
 EXCLUDED_TOKENS = {"asymmetry", "left", "right", "l", "r", "toon", "fix", "adjust", "adjustment", "legacy", "hd",
-                   "nipple", "nipples", "eyelashes", "eyelash", "lashes", "navel", "cameltoe", "genitalia",
+                   "eyelashes", "eyelash", "lashes", "navel", "cameltoe", "genitalia",
                    "propagating", "anime", "expression", "pose"}
 EXCLUDED_GROUPS = re.compile(r"/(Pose Controls|People|Characters|Tools|Hidden)(/|$)", re.IGNORECASE)
 NOT_SKIN = re.compile(r"eye|iris|pupil|sclera|cornea|lacrimal|tear|moisture|teeth|mouth|tongue|gum|lash|nail|brow",
@@ -39,7 +40,8 @@ NOT_SKIN = re.compile(r"eye|iris|pupil|sclera|cornea|lacrimal|tear|moisture|teet
 
 MISSING_HINT = ("Dials that are not installed cannot be set. More shape dials come with Daz's base morph packs "
                 "(Genesis 9 Head and Body Morphs; Genesis 8 / 8.1 Female or Male Head and Body Morphs). "
-                "Meanwhile, morph_generate(figure) makes 20 of them (nose, chin, jaw, cheeks, ears, age, weight, muscle...) on Genesis 9 and 8 / 8.1, "
+                "Meanwhile, morph_generate(figure) makes 24 of them (nose, chin, jaw, cheeks, ears, age, weight, "
+                "muscle, bust...) on Genesis 9 and 8 / 8.1, or morph_import brings a shape sculpted in Blender; "
                 "and mixing the installed character heads and bodies at partial values in `dials` "
                 "(morph_list(figure, query=\"people\")) also gives a unique face and body.")
 
@@ -349,6 +351,14 @@ TRAITS: dict[str, Trait] = {t.name: t for t in [
     _t("breast_shape", "body", "perkier, higher breasts", "lower, natural hang",
        search=(_s("breast perk"), _s("breast perky", "up"), _s("breast sag", "down"), _s("natural hang", "down"),
                _s("breast gone down", "down"))),
+    _t("areola_size", "body", "larger areolas", "smaller areolas",
+       search=(_s("areola"), _s("areola size"), _s("areola diameter"), _s("nipple areola"))),
+    _t("nipple_projection", "body", "nipples project more", "flatter nipples",
+       primary=(_one("Nipples Tips Feminine Large HD", direction="up"),),
+       search=(_s("nipple tip"), _s("nubby nipple tip"), _s("nipple projection"), _s("nipple depth"))),
+    _t("nipples_detail", "body", "more detailed, defined nipples", "-", low=0.0,
+       primary=(_one("Nipples Feminine HD", direction="up"), _one("Nipples", direction="up")),
+       search=(_s("nubby nipple", "up"),)),
 ]}
 
 
@@ -544,7 +554,9 @@ def follower_roles(wearing: list[dict]) -> dict[Role, str]:
     for item in wearing:
         label = str(item.get("label", ""))
         base = re.sub(r"\s*\(\d+\)$", "", label)
-        if re.search(r"\bMouth$", base) and "mouth" not in roles:
+        if ANATOMY.search(base) and "anatomy" not in roles:
+            roles["anatomy"] = label
+        elif re.search(r"\bMouth$", base) and "mouth" not in roles:
             roles["mouth"] = label
         elif re.search(r"\bEyes$", base) and "eyes" not in roles:
             roles["eyes"] = label
@@ -603,6 +615,7 @@ def new_sheet(name: str) -> dict:
         "brows": {"items": [], "color": None, "tip_color": None},
         "facial_hair": {"items": [], "color": None, "tip_color": None},
         "colors": {"teeth": None, "gums": None, "nails": None, "lips": None},
+        "anatomy": [],
         "clothing": [],
         "extras": [],
         "presets": [],
@@ -624,7 +637,7 @@ def traits_help() -> str:
 
 
 def worn_paths(sheet: dict) -> list[str]:
-    out = list(sheet.get("clothing") or []) + list(sheet.get("extras") or [])
+    out = list(sheet.get("anatomy") or []) + list(sheet.get("clothing") or []) + list(sheet.get("extras") or [])
     for key in ("hair", "brows", "facial_hair"):
         out += list((sheet.get(key) or {}).get("items") or [])
     return out
@@ -687,7 +700,7 @@ def list_sheets(folder: Path) -> list[dict]:
 
 
 DESCRIBING = ("figure", "body", "face", "height_cm", "dials", "skin", "eyes", "hair", "brows", "facial_hair",
-              "colors", "clothing", "extras", "presets", "materials")
+              "colors", "anatomy", "clothing", "extras", "presets", "materials")
 
 
 def content_hash(sheet: dict) -> str:

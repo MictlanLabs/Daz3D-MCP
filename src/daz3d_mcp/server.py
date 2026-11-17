@@ -37,8 +37,8 @@ Characters to reuse: character_create turns a description into a character
 (body, every face detail, skin, eyes, hair, clothes) saved as an editable sheet;
 character_load puts it in any scene, character_update changes only what is
 asked, character_list lists them and the traits; morph_generate makes dials for
-traits with no installed morph (nose, jaw, ears, age, weight... on Genesis 9
-and 8 / 8.1).
+traits with no installed morph (nose, jaw, ears, age, weight, bust... on Genesis 9
+and 8 / 8.1); morph_export / morph_import bring shapes sculpted in Blender.
 Dialogue scenes (visual novels): camera_shot frames a close-up, over the shoulder
 or two shot on a face, on one side of the line between the two speakers;
 render_shots renders a whole conversation, one image per line.

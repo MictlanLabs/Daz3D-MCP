@@ -25,11 +25,41 @@ Call = Callable[..., Awaitable[Any]]
 Vec3 = Annotated[list[float], Field(min_length=3, max_length=3)]
 Color = Annotated[list[float] | str, Field(description="[r, g, b] from 0 to 1, or \"#rrggbb\".")]
 Generation = Literal["Genesis 9", "Genesis 8.1 Female", "Genesis 8.1 Male", "Genesis 8 Female", "Genesis 8 Male"]
-Step = Literal["character", "preset", "presets", "shape", "eyes", "skin", "colors", "hair", "clothing", "extras",
-               "follow", "materials", "height", "position"]
-STEPS: list[str] = ["character", "preset", "presets", "shape", "eyes", "skin", "colors", "hair", "clothing",
+Step = Literal["character", "preset", "presets", "anatomy", "shape", "eyes", "skin", "colors", "hair", "clothing",
+               "extras", "follow", "materials", "height", "position"]
+STEPS: list[str] = ["character", "preset", "presets", "anatomy", "shape", "eyes", "skin", "colors", "hair", "clothing",
                     "extras", "follow", "materials", "height", "position"]
-FOLLOW_AFTER = {"shape", "hair", "clothing", "extras"}
+FOLLOW_AFTER = {"shape", "anatomy", "hair", "clothing", "extras"}
+ANATOMY_QUERIES = ("anatomical elements", "genitalia", "geograft", "gens")
+ANATOMY_SKIP = re.compile(r"material|\bmat\b|shader|texture|\bpose|hide|remove|\bfix", re.IGNORECASE)
+
+
+def sex_of(sheet: dict, generation: str | None) -> str | None:
+    gen = str(generation or "")
+    body = sheet.get("body") or {}
+    if "Female" in gen or (body.get("feminine") or 0) > (body.get("masculine") or 0):
+        return "feminine"
+    if "Male" in gen or (body.get("masculine") or 0) > 0:
+        return "masculine"
+    return None
+
+
+def pick_anatomy(found: list[dict], sex: str | None) -> list[dict]:
+    seen: set[str] = set()
+    out = []
+    for item in found:
+        path = str(item.get("path") or "")
+        if path in seen or ANATOMY_SKIP.search(Path(path).stem):
+            continue
+        seen.add(path)
+        text = path.lower()
+        fem = bool(re.search(r"femin|female|\bf\b|g9f|g8f", text))
+        mas = bool(re.search(r"mascul|\bmale\b|\bm\b|g9m|g8m", text))
+        score = 0 if sex is None else (2 if (sex == "feminine" and fem) or (sex == "masculine" and mas) else
+                                        (0 if fem or mas else 1))
+        out.append({**item, "score": score})
+    out.sort(key=lambda x: -x["score"])
+    return out
 ROOT_PROPS = ("Hair Root Color", "Root Transmission Color", "Base Color")
 TIP_PROPS = ("Hair Tip Color", "Tip Transmission Color")
 
@@ -114,6 +144,17 @@ def _color(value: Any) -> Any:
 def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient], content: ContentAccess,
              morphs: Generator | None = None) -> None:
 
+    async def find_anatomy(generation: str | None, sex: str | None) -> list[dict]:
+        gen = str(generation or "")
+        family = "Genesis 9" if gen.startswith("Genesis 9") else gen.replace(" Female", "").replace(" Male", "")
+        found: list[dict] = []
+        for query in ANATOMY_QUERIES:
+            for item in await content.search(query, None, None):
+                g = str(item.get("generation") or "")
+                if not g or g.startswith(family) or family.startswith(g):
+                    found.append(item)
+        return pick_anatomy(found, sex)
+
     def folder() -> Path:
         return ch.characters_dir(get_client().settings.characters_dir)
 
@@ -194,6 +235,19 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient], cont
         async def step_preset() -> None:
             if preset is not None:
                 await call("content_load", {"path": preset.as_posix(), "kind": "character", "target": label})
+
+        async def step_anatomy() -> None:
+            paths = list(sheet.get("anatomy") or [])
+            if "auto" in paths:
+                paths.remove("auto")
+                found = await find_anatomy(generation, sex_of(sheet, generation))
+                if found and found[0]["score"] > 0:
+                    paths.insert(0, found[0]["path"])
+                    report["anatomy"] = applied["anatomy_auto"] = found[0]["path"]
+                else:
+                    note(f"No anatomy geograft for {generation} is installed (Genesis 9 Anatomical Elements, or "
+                         "a Genesis 8 / 8.1 one). Install one, then load the character again.")
+            await wear(paths)
 
         async def step_presets() -> None:
             for path in [sheet["skin"].get("preset"), sheet["eyes"].get("preset"), *(sheet.get("presets") or [])]:
@@ -364,6 +418,7 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient], cont
         actions = {"character": step_character, "preset": step_preset, "presets": step_presets,
                    "shape": step_shape, "eyes": step_eyes, "skin": step_skin, "colors": step_colors,
                    "hair": step_hair, "clothing": step_clothing, "extras": step_extras, "follow": step_follow,
+                   "anatomy": step_anatomy,
                    "materials": step_materials, "height": step_height, "position": step_position}
         order = [s for s in STEPS if s in steps]
         for i, step in enumerate(order):
@@ -437,9 +492,10 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient], cont
             for key, value in colors.model_dump(exclude_unset=True).items():
                 sheet["colors"][key] = _color(value)
             changed.add("colors")
-        for key, step in (("clothing", "clothing"), ("extras", "extras"), ("presets", "presets")):
+        for key, step in (("clothing", "clothing"), ("extras", "extras"), ("presets", "presets"),
+                          ("anatomy", "anatomy")):
             if given.get(key) is not None:
-                sheet[key] = [await rel(p) for p in given[key]]
+                sheet[key] = [p if p == "auto" else await rel(p) for p in given[key]]
                 changed.add(step)
         materials: list[MaterialEdit] | None = given.get("materials")
         if materials is not None:
@@ -483,6 +539,10 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient], cont
                                                                   "color.")] = None,
         colors: ColorsSpec | None = None,
         clothing: Annotated[list[str] | None, Field(description="Clothing and shoe content files.")] = None,
+        anatomy: Annotated[list[str] | None, Field(description="Anatomy geografts (genitals) for the figure, "
+                                                              "or [\"auto\"] to use the installed one that "
+                                                              "matches; character_list(include_anatomy=true) "
+                                                              "lists them.")] = None,
         extras: Annotated[list[str] | None, Field(description="Add-ons that are part of the body: horns, tail, "
                                                               "wings, animal ears (kept when the outfit "
                                                               "changes).")] = None,
@@ -507,7 +567,7 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient], cont
             sheet["figure"]["character"] = await rel(character_preset)
         await fill(sheet, description=description, notes=notes, traits=traits, dials=dials, height_cm=height_cm,
                    skin=skin, eyes=eyes, hair=hair, brows=brows, facial_hair=facial_hair, colors=colors,
-                   clothing=clothing, extras=extras, presets=presets, materials=materials)
+                   clothing=clothing, extras=extras, presets=presets, materials=materials, anatomy=anatomy)
         if figure:
             label = figure
             info = await call("figure_info", {"figure": figure})
@@ -598,6 +658,8 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient], cont
         remove_clothing: Annotated[list[str] | None, Field(description="Items to take off: file paths or words "
                                                                        "of their names.")] = None,
         extras: Annotated[list[str] | None, Field(description="Replaces the add-ons (horns, tail...).")] = None,
+        anatomy: Annotated[list[str] | None, Field(description="Replaces the anatomy geografts; [] removes "
+                                                              "them, [\"auto\"] picks the installed one.")] = None,
         presets: Annotated[list[str] | None, Field(description="Replaces the other presets.")] = None,
         materials: Annotated[list[MaterialEdit] | None, Field(description="Replaces the kept material "
                                                                           "changes.")] = None,
@@ -609,7 +671,6 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient], cont
         preset."""
         path = locate(name)
         sheet = load_sheet(path)
-        old_worn = ch.worn_paths(sheet)
         new_clothing = clothing
         if add_clothing or remove_clothing:
             base = list(clothing if clothing is not None else sheet.get("clothing") or [])
@@ -621,6 +682,7 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient], cont
         changed = await fill(sheet, description=description, notes=notes, traits=traits, dials=dials,
                              height_cm=height_cm, skin=skin, eyes=eyes, hair=hair, brows=brows,
                              facial_hair=facial_hair, colors=colors, clothing=new_clothing, extras=extras,
+                             anatomy=anatomy,
                              presets=presets, materials=materials)
         target = figure
         if target is None and sheet["name"] in await labels_in_scene():
@@ -633,7 +695,9 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient], cont
             applied = sheet.get("applied") or {}
             worn = dict(applied.get("worn") or {})
             keep = set(ch.worn_paths(sheet))
-            gone = [g for p in old_worn if p not in keep and p in worn for g in _as_list(worn.pop(p))]
+            if "auto" in (sheet.get("anatomy") or []) and applied.get("anatomy_auto"):
+                keep.add(applied["anatomy_auto"])
+            gone = [g for p in list(worn) if p not in keep for g in _as_list(worn.pop(p))]
             current = await labels_in_scene()
             gone = [g for g in gone if g in current]
             if gone:
@@ -657,6 +721,8 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient], cont
     @mcp.tool(annotations=READ_ONLY)
     async def character_list(
         include_traits: Annotated[bool, Field(description="Also list every trait and what its ends mean.")] = False,
+        include_anatomy: Annotated[str | None, Field(description="Generation (e.g. \"Genesis 9\") whose installed "
+                                                                 "anatomy geografts to list.")] = None,
         name: Annotated[str | None, Field(description="Show this character's whole sheet.")] = None,
     ) -> dict:
         """Lists the saved characters (sheet and Daz preset files), or shows one sheet; optionally the
@@ -668,6 +734,13 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient], cont
             out["path"] = path.as_posix()
         else:
             out["characters"] = ch.list_sheets(folder())
+        if include_anatomy:
+            found = await find_anatomy(include_anatomy, None)
+            out["anatomy"] = [{"name": f.get("name"), "path": f.get("path"), "generation": f.get("generation")}
+                              for f in found]
+            if not found:
+                out["anatomy_note"] = (f"No anatomy geograft for {include_anatomy} is installed (Genesis 9 "
+                                       "Anatomical Elements, or a Genesis 8 / 8.1 one).")
         if include_traits:
             out["traits"] = ch.catalog()
         return out

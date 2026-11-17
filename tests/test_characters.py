@@ -183,6 +183,7 @@ class FakeDaz:
         self.nodes: dict[str, dict] = {}
         self.calls: list[tuple[str, dict]] = []
         self.tmp = tmp
+        self.library: list[dict] = []
 
     def _add(self, label: str, **node) -> str:
         base, n = label, 2
@@ -207,7 +208,7 @@ class FakeDaz:
                     added.append({"label": sub, "type": "fitted_figure", "fitted_to": label})
             return {"added": added}
         assert target in self.nodes, (path, target)
-        if "Hair" in path or "Clothing" in path:
+        if "Hair" in path or "Clothing" in path or "Anatomy" in path:
             label = self._add(Path(path).stem, type="fitted_figure", fitted_to=target, dials={}, meta=[])
             return {"added": [{"label": label, "type": "fitted_figure", "fitted_to": target}]}
         self.nodes[target].setdefault("presets", []).append(path)
@@ -294,7 +295,10 @@ def setup(tmp_path):
     async def relative(path):
         return path
 
-    content = ContentAccess(lambda: None, load, relative)
+    async def search(query, kind, generation):
+        return [r for r in daz.library if query.lower() in r["path"].lower()]
+
+    content = ContentAccess(lambda: None, load, relative, search)
     character_tools.register(mcp, daz.call, lambda: client, content)
 
     def run(tool, **args):
@@ -461,3 +465,34 @@ def test_how_a_trait_was_made():
     res = ch.resolve({"lips_fullness": 0.3, "eyes_deep": 0.3, "asymmetry": 1}, g9(), "Genesis 9")
     assert res.traits["lips_fullness"]["how"] == "pair"
     assert res.traits["eyes_deep"]["how"] == "pair"
+
+
+FEM = "People/Genesis 9/Anatomy/Genesis 9 Feminine Anatomical Elements.duf"
+MAS = "People/Genesis 9/Anatomy/Genesis 9 Masculine Anatomical Elements.duf"
+
+
+def test_anatomy_auto_picks_the_installed_geograft_and_reports_when_missing(setup):
+    daz, run, _ = setup
+    out = run("character_create", name="Nadia", traits={"feminine": 1}, anatomy=["auto"])
+    assert any("No anatomy geograft" in n for n in out["notes"])
+    daz.library = [{"name": "Feminine", "path": FEM, "generation": "Genesis 9"},
+                   {"name": "Feminine MAT", "path": "People/Genesis 9/Anatomy/Materials/Anatomical Elements MAT.duf",
+                    "generation": "Genesis 9"},
+                   {"name": "Masculine", "path": MAS, "generation": "Genesis 9"}]
+    listed = run("character_list", include_anatomy="Genesis 9")
+    assert {a["path"] for a in listed["anatomy"]} == {FEM, MAS}
+    out = run("character_create", name="Omar", traits={"masculine": 1}, anatomy=["auto"],
+              dials={"anatomy:Size": 0.4})
+    assert out["anatomy"] == MAS
+    assert daz.nodes["Genesis 9 Masculine Anatomical Elements"]["fitted_to"] == "Omar"
+    out = run("character_update", name="Omar", anatomy=[])
+    assert out["removed"] == ["Genesis 9 Masculine Anatomical Elements"]
+
+
+def test_pick_anatomy_prefers_the_right_body():
+    found = [{"path": FEM}, {"path": MAS}, {"path": "x/Anatomical Elements Shader.duf"}]
+    assert character_tools.pick_anatomy(found, "masculine")[0]["path"] == MAS
+    assert character_tools.pick_anatomy(found, "feminine")[0]["path"] == FEM
+    assert len(character_tools.pick_anatomy(found, None)) == 2
+    assert ch.follower_roles([{"label": "Genesis 9 Feminine Anatomical Elements"}]) == {
+        "anatomy": "Genesis 9 Feminine Anatomical Elements"}

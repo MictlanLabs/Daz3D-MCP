@@ -214,7 +214,8 @@ settings, token and content index.
 | `eyes_look_at` | Aims the eyes (and part of the head turn) at a camera, another figure or a point |
 | `eye_color` | Iris color (the whites stay white), Genesis 9's 16 iris images, one color per eye; `sclera` colors the whites |
 | `character_create` | Builds a character from a description (body, height, every face detail including teeth, ears and nose, skin, eyes, hair, eyebrows, facial hair, clothes, add-ons) and saves it as an editable character sheet (JSON) plus a Daz character preset; traits are mapped to the dials installed on the figure's generation and missing ones are reported |
-| `morph_generate` | Makes new shape dials for traits the user has no morph for (20 dials: nose, chin, jaw, cheeks, ears, age, weight, muscle... on Genesis 9 and 8 / 8.1) from the figure's own mesh and bone weights, saves them in a content library and makes clothing, hair, brows and lashes follow them |
+| `morph_generate` | Makes new shape dials for traits the user has no morph for (24 dials: nose, chin, jaw, cheeks, ears, age, weight, muscle, bust... on Genesis 9 and 8 / 8.1) from the figure's own mesh and bone weights, saves them in a content library and makes clothing, hair, brows and lashes follow them |
+| `morph_export` / `morph_import` | Writes a figure's base mesh as OBJ to sculpt in Blender, and brings the sculpt back as a dial (size and axes matched, saved, followed by worn items) |
 | `character_load` / `character_update` / `character_list` | Puts a saved character in any scene (Genesis 9, 8.1 or 8) / changes only what is asked / lists characters and the trait vocabulary |
 | `pose_bones` / `pose_reset` | Rotates bones (reports dials held at joint limits) / back to the default pose |
 | `prop_surfaces` | Measures where a figure can sit, lie or stand on a prop: height, size, which way a seat faces |

@@ -182,7 +182,7 @@ def test_character_tools_make_items_follow_generated_dials(tool):
     daz.morphs["Bruno:DazMcp_Weight"] = {"master": None, "deltas": 1}
     recipes = anyio.run(gen.in_use, "Bruno")
     assert [r.trait for r in recipes] == ["weight"]
-    assert character_tools.FOLLOW_AFTER == {"shape", "hair", "clothing", "extras"}
+    assert character_tools.FOLLOW_AFTER == {"shape", "anatomy", "hair", "clothing", "extras"}
 
 
 def test_every_region_names_bones_for_both_generations():
@@ -222,3 +222,34 @@ def test_spheres_find_the_nose_tip(tmp_path):
     assert mesh.landmarks["nose_tip"][2] == 2.0
     region = mesh.sphere(mg.Sphere("nose_tip", (0.0, 0.0, 0.0), (1.5, 1.5, 3.0)))
     assert region[mid] == pytest.approx(1.0) and len(region) < 15
+
+
+def test_sculpt_from_blender_is_matched_in_size_and_axes(mesh, tmp_path):
+    path = tmp_path / "base.obj"
+    mg.write_obj(path, mesh, "m")
+    verts = mg.read_obj_vertices(path)
+    sculpt = [(x, -z, y) for x, y, z in verts]
+    sculpt[10] = (sculpt[10][0], sculpt[10][1] - 0.005, sculpt[10][2])
+    deltas, fit = mg.sculpt_deltas(mesh.vertices, sculpt)
+    assert fit["axis"] == "z_up" and fit["scale"] == 100.0
+    assert list(deltas) == [10] and deltas[10][2] == pytest.approx(0.5, abs=1e-3)
+    with pytest.raises(ValueError, match="vertices"):
+        mg.sculpt_deltas(mesh.vertices, sculpt[:-1])
+    with pytest.raises(ValueError, match="line up"):
+        mg.sculpt_deltas(mesh.vertices, list(reversed(sculpt)))
+
+
+def test_morph_import_tool_makes_a_dial_from_an_obj(tool, tmp_path):
+    daz, run = tool
+    grid = grid_mesh()
+    flat = grid["vertices"]
+    lines = [f"v {flat[i]} {flat[i + 1]} {flat[i + 2] + (0.3 if i == 0 else 0.0)}" for i in range(0, len(flat), 3)]
+    obj = tmp_path / "sculpt.obj"
+    obj.write_text("\n".join(lines))
+    out = run("morph_import", figure="Bruno", obj=str(obj), label="Hooked Nose", group="/Actor/Head/Face/Nose")
+    assert out["dial"] == "MCP Hooked Nose" and out["name"] == "DazMcp_HookedNose"
+    assert daz.morphs["Bruno:DazMcp_HookedNose"]["deltas"] == 1
+    assert daz.morphs["Shirt:DazMcp_HookedNose"]["master"] == "Bruno"
+    assert out["saved"]["morphs"] == ["DazMcp_HookedNose"]
+    exported = run("morph_export", figure="Bruno", path=str(tmp_path / "out.obj"), units="cm")
+    assert exported["vertices"] == 81 and (tmp_path / "out.obj").read_text().count("\nf ") == 64

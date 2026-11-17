@@ -198,6 +198,13 @@ class Mesh:
             c = self.left_centroid(canon)
             if c:
                 marks[canon] = c
+        nipple = None
+        for i, w in self.bones({"pecs": 1.0}).items():
+            x, _, z = self.vertices[i]
+            if w > 0.6 and x > 0.5 and (nipple is None or z > self.vertices[nipple][2]):
+                nipple = i
+        if nipple is not None:
+            marks["nipple"] = self.vertices[nipple]
         if "ear" in marks:
             ex, ey, ez = marks["ear"]
             marks["ear_root"] = (ex - 0.9, ey, ez)
@@ -389,12 +396,14 @@ NOSE_GROUP = "/Actor/Head/Face/Nose/Daz3D-MCP"
 FACE_GROUP = "/Actor/Head/Face/Daz3D-MCP"
 JAW_GROUP = "/Actor/Head/Face/Cheeks and Jaw/Daz3D-MCP"
 BODY_GROUP = "/Actor/Full Body/Daz3D-MCP"
+CHEST_GROUP = "/Actor/Chest/Daz3D-MCP"
 
 
 PEAKS = {"nose_width": 0.5, "nose_size": 0.45, "nose_length": 0.45, "nose_bridge": 0.35, "nose_tip_up": 0.3,
          "philtrum": 0.35, "temples": 0.35, "eye_bags": 0.22, "cheekbones": 0.35, "chin_length": 0.45,
          "chin_forward": 0.45, "jaw_width": 0.6, "jaw_definition": 0.4, "lips_fullness": 0.3, "ears_size": 0.55,
-         "ears_out": 0.7, "age": 0.45, "weight": 4.0, "muscle": 1.0, "belly": 3.0}
+         "ears_out": 0.7, "age": 0.45, "weight": 4.0, "muscle": 1.0, "belly": 3.0, "bust": 3.2,
+         "breast_shape": 1.8, "areola_size": 0.45, "nipple_projection": 0.4}
 
 
 def _r(name: str, label: str, group: str, trait: str, plus: str, *ops: Op, smooth: int = 3) -> Recipe:
@@ -464,7 +473,78 @@ RECIPES: dict[str, Recipe] = {r.trait: r for r in [
     _r("DazMcp_Muscle", "MCP Muscle", BODY_GROUP, "muscle", "more muscular (bulk)",
        Op("inflate", MUSCLE, (0.8, 0.0, 0.0), smooth=6),
        Op("inflate", {"belly": 1.0, "waist": 0.6}, (-0.35, 0.0, 0.0), smooth=5), smooth=4),
+    _r("DazMcp_Bust", "MCP Bust", CHEST_GROUP, "bust", "larger breasts",
+       Op("inflate", amount=(1.0, 0.0, 0.0), sphere=Sphere("nipple", (-0.3, 0.6, -2.5), (6.5, 6.5, 6.0), mirror=True),
+          smooth=4, front=1.2),
+       Op("move", amount=(0.0, -0.25, 0.0), sphere=Sphere("nipple", (0.0, -1.0, 0.0), (6.0, 5.0, 5.0), mirror=True),
+          smooth=4), smooth=4),
+    _r("DazMcp_BreastPerk", "MCP Breast Perk", CHEST_GROUP, "breast_shape", "perkier, higher breasts",
+       Op("move", amount=(0.0, 1.0, 0.25), sphere=Sphere("nipple", (0.0, -0.8, 0.0), (6.0, 6.0, 6.0), mirror=True),
+          smooth=4), smooth=4),
+    _r("DazMcp_AreolaSize", "MCP Areola Size", CHEST_GROUP, "areola_size", "larger areolas",
+       Op("scale", amount=(0.4, 0.4, 0.0), center_at="nipple",
+          sphere=Sphere("nipple", (0.0, 0.0, 0.0), (1.8, 1.8, 1.5), mirror=True), smooth=1), smooth=1),
+    _r("DazMcp_NippleProjection", "MCP Nipple Projection", CHEST_GROUP, "nipple_projection", "nipples project more",
+       Op("move", amount=(0.0, 0.0, 0.3), sphere=Sphere("nipple", (0.0, 0.0, 0.0), (0.7, 0.7, 1.2), mirror=True),
+          smooth=1), smooth=1),
     _r("DazMcp_Belly", "MCP Belly", BODY_GROUP, "belly", "round belly",
        Op("inflate", {"belly": 1.5, "pelvis": 0.5, "waist": 0.8}, (1.0, 0.0, 0.0), smooth=6, front=1.5),
        smooth=4),
 ]}
+
+
+UNITS = {"cm": 1.0, "m": 0.01, "mm": 10.0}
+
+
+def write_obj(path: Path, mesh: Mesh, units: str = "cm") -> None:
+    k = UNITS[units]
+    lines = [f"# {mesh.generation} base mesh, {len(mesh.vertices)} vertices, {units}, Y up"]
+    lines += [f"v {x * k:.5f} {y * k:.5f} {z * k:.5f}" for x, y, z in mesh.vertices]
+    lines += ["f " + " ".join(str(i + 1) for i in face) for face in mesh.facets]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def read_obj_vertices(path: Path) -> list[Vec]:
+    out: list[Vec] = []
+    with path.open(encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            if line.startswith("v "):
+                parts = line.split()
+                out.append((float(parts[1]), float(parts[2]), float(parts[3])))
+    return out
+
+
+def _height(points: list[Vec], axis: int) -> float:
+    vals = [p[axis] for p in points]
+    return (max(vals) - min(vals)) or 1.0
+
+
+SNAP = (1.0, 10.0, 100.0, 1000.0, 0.1, 0.01, 2.54, 1 / 2.54)
+
+
+def sculpt_deltas(base: list[Vec], sculpt: list[Vec], threshold: float = 0.01) -> tuple[dict[int, Vec], dict]:
+    if len(base) != len(sculpt):
+        raise ValueError(f"The OBJ has {len(sculpt)} vertices; the base mesh has {len(base)}. Export and sculpt the "
+                         "base resolution without adding or removing vertices.")
+    candidates = {"y_up": lambda p: p, "z_up": lambda p: (p[0], p[2], -p[1])}
+    best = None
+    for name, turn in candidates.items():
+        turned = [turn(p) for p in sculpt]
+        scale = _height(base, 1) / _height(turned, 1)
+        scale = next((k for k in SNAP if abs(scale / k - 1) < 0.01), scale)
+        moved = [(x * scale, y * scale, z * scale) for x, y, z in turned]
+        sample = range(0, len(base), max(1, len(base) // 2000))
+        err = sorted(math.dist(base[i], moved[i]) for i in sample)
+        median = err[len(err) // 2]
+        if best is None or median < best[0]:
+            best = (median, name, scale, moved)
+    median, axis, scale, moved = best
+    if median > 1.0:
+        raise ValueError(f"The OBJ does not line up with the base mesh (median distance {median:.2f} cm after "
+                         "matching size and axes). Keep the vertex order and the base pose and shape.")
+    deltas: dict[int, Vec] = {}
+    for i, (b, s) in enumerate(zip(base, moved)):
+        d = (s[0] - b[0], s[1] - b[1], s[2] - b[2])
+        if abs(d[0]) + abs(d[1]) + abs(d[2]) > threshold:
+            deltas[i] = (round(d[0], 5), round(d[1], 5), round(d[2], 5))
+    return deltas, {"axis": axis, "scale": round(scale, 6), "median_offset_cm": round(median, 4)}

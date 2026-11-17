@@ -94,6 +94,7 @@ class ContentAccess:
     forget: Callable[[], None]
     load: Callable[[str, str | None], Awaitable[dict]]
     relative: Callable[[str], Awaitable[str]]
+    search: Callable[[str, str | None, str | None], Awaitable[list[dict]]]
 
 
 def _clean(**kwargs) -> dict:
@@ -1128,4 +1129,9 @@ def register(mcp: FastMCP, call: Call, get_client: Callable[[], DazClient],
         content.append(json.dumps(result, ensure_ascii=False))
         return content
 
-    return ContentAccess(forget, load_content, library_relative)
+    async def search_content(query: str, kind: str | None, generation: str | None) -> list[dict]:
+        idx = await index()
+        found = await anyio.to_thread.run_sync(lambda: idx.search(query, kind, generation, None, 50, 0))
+        return list(found.get("results") or [])
+
+    return ContentAccess(forget, load_content, library_relative, search_content)

@@ -80,7 +80,7 @@ get the rest (material, item, preset).
 2. **Age**: `age`, `wrinkles`, `eye_bags`, `jowls`, `nasolabial`,
    `double_chin`; without those dials see "Age without dials".
 3. **Height and build**: `height_cm` (exact), `weight`, `muscle`, `bust`,
-   `breast_shape`, `chest_width`, `shoulders`, `waist`, `belly`, `hips`,
+   `breast_shape`, `areola_size`, `nipple_projection`, `nipples_detail`, `chest_width`, `shoulders`, `waist`, `belly`, `hips`,
    `glutes`, `thighs`, `calves`, `upper_arms`, `forearms`, `legs_length`,
    `arms_length`, `torso_length`, `neck_length`, `neck_width`, `adams_apple`,
    `head_size`, `hands_size`, `fingers_length`, `feet_size`, `nails_length`.
@@ -123,7 +123,7 @@ get the rest (material, item, preset).
 16. **Hands and nails**: `hands_size`, `fingers_length`, `nails_length`,
     `colors.nails`.
 17. **Outfit and add-ons**: `clothing` (shoes too); `extras` for horns, tail,
-    wings, animal ears.
+    wings, animal ears; `anatomy` for genital geografts (section 9b).
 18. **Signature feature**: pick one thing people will remember and give it
     0.4 to 0.6 (a nose hump, gap teeth, high cheekbones, ears that stick out,
     heterochromia, a scar).
@@ -135,7 +135,7 @@ real faces need 0.15 to 0.5; several traits near 1 look like a caricature.
 One-way traits (0 to 1 only): `feminine`, `masculine`, `pupils_slit`,
 `chin_cleft`, `nose_hump`, `ears_pointed`, `teeth_gap`, `gums_hidden`, `fangs`,
 `fangs_lower`, `wrinkles`, `eye_bags`, `jowls`, `double_chin`, `dimples`,
-`nasolabial`, `adams_apple`, `eyelashes_length`, `lashes_volume`,
+`nasolabial`, `adams_apple`, `nipples_detail`, `eyelashes_length`, `lashes_volume`,
 `lashes_sparse`, `lashes_natural`, `asymmetry`.
 
 **Body**
@@ -152,6 +152,8 @@ One-way traits (0 to 1 only): `feminine`, `masculine`, `pupils_slit`,
 | big arms / skinny arms | `upper_arms` 0.5, `forearms` 0.3 / `upper_arms` -0.4 |
 | big rear / flat rear | `glutes` 0.4 / -0.3 |
 | perky / natural breasts | `breast_shape` 0.4 / -0.4 |
+| large / small areolas | `areola_size` 0.5 / -0.4 (the color is the skin image: see section 9) |
+| prominent / flat nipples | `nipple_projection` 0.5 / -0.4, `nipples_detail` 0.6 |
 | broad shoulders | `shoulders` 0.5, `chest_width` 0.3 |
 | long legs / long arms, lanky | `legs_length` 0.4 / `arms_length` 0.4 |
 | long torso / short-waisted | `torso_length` 0.3 / -0.3 |
@@ -287,7 +289,7 @@ expect before promising a look:
 | Approximated | `bust` (chest scale), `nose_width` (nostrils), `eyes_size` (eyeball only), `fangs` / `fangs_lower` (toon canines) | `bust`, `head_size`, hands, feet (scales), `height` (figure scale) |
 | Missing | `weight`, `muscle`, `age`, `wrinkles`, waist, hips, belly, thighs, nose size, length, bridge, hump, tip, jaw width and definition, chin, ears size and shape, forehead, temples, philtrum, dimples, `bite` | almost every face trait |
 
-`morph_generate` (section 4b) makes 20 of the missing dials on Genesis 9 and
+`morph_generate` (section 4b) makes 24 of the missing dials on Genesis 9 and
 on Genesis 8 / 8.1 (weight, muscle, belly, age, nose size, length, bridge,
 tip, chin, jaw, cheekbones, temples, eye bags, philtrum, lips, ears). The full
 Head and Body Morphs packs turn most "missing" lines into "works"; the
@@ -303,8 +305,8 @@ Genesis 9 and Genesis 8 / 8.1 (Female and Male): `nose_width`, `nose_size`,
 `cheekbones`, `chin_length`, `chin_forward`, `jaw_width`, `jaw_definition`,
 `lips_fullness`, `ears_size`, `ears_out`, `age` (eye bags, sagging lower
 cheeks, hollow temples, lower brows and mouth corners, thinner lips), `weight`,
-`muscle` (bulk on arms, shoulders, chest and legs, a slimmer waist) and
-`belly`. `morph_generate(figure, traits=[...])` makes them from the figure's
+`muscle` (bulk on arms, shoulders, chest and legs, a slimmer waist), `belly`,
+`bust`, `breast_shape`, `areola_size` and `nipple_projection`. `morph_generate(figure, traits=[...])` makes them from the figure's
 own mesh, its face and body bone weights and points found on the face (nose
 tip, outer brow, ears), labels them "MCP <name>" (group Daz3D-MCP), saves them
 in Daz's first content library (`data/<figure>/Morphs/Daz3D-MCP/Generated`),
@@ -323,6 +325,24 @@ dials (`how: "generated"`).
   approximated substitute.
 - Items loaded later follow them after `character_load` / `character_update`
   (the `follow` step) or `morph_generate(figure, traits=[...], save=false)`.
+
+**Shapes no recipe makes: sculpt them in Blender.** For a specific nose,
+breast shape, ear or anything else the user can describe better with a brush:
+
+1. `morph_export(figure, path="C:/.../g9_base.obj", units="m")` writes the base
+   mesh (no morphs, default pose, base resolution).
+2. In Blender: File > Import > Wavefront (.obj) with the default axes, sculpt
+   with the sculpt brushes only (no Remesh, Dyntopo, Decimate or applied
+   Subdivision: the vertex count and order must stay the same), don't move or
+   scale the object, then File > Export > Wavefront (.obj) with "Selected only"
+   and no modifiers.
+3. `morph_import(figure, obj="C:/.../sculpt.obj", label="Hooked Nose",
+   group="/Actor/Head/Face/Nose")` makes the dial "MCP Hooked Nose": size and
+   Y-up / Z-up axes are matched automatically, `fit.median_offset_cm` shows how
+   well it lined up, it is saved in the library and worn items follow it. Put
+   it in a sheet with `dials={"MCP Hooked Nose": 0.8}`.
+
+ZBrush or any modeler works the same way through OBJ.
 
 ## 5. What the result says
 
@@ -367,7 +387,7 @@ dials (`how: "generated"`).
   Right": 0.5}`).
 - Teeth (`Genesis 9 Mouth`) and irises and pupils (`Genesis 9 Eyes`) have
   their own dials; traits find them, and `dials` reaches them with `mouth:` /
-  `eyes:`. Never set "Mouth Width / Height / Depth / Size" on the Mouth figure
+  `eyes:` (and an anatomy geograft's with `anatomy:`). Never set "Mouth Width / Height / Depth / Size" on the Mouth figure
   by hand: they only follow head morphs and move the teeth, not the lips.
 
 ## 7. Keep the cast distinct
@@ -450,6 +470,12 @@ only darkens with a color; use the hair's own color presets
 (`content_search(kind="material", query=<hair name>)`) and load them on the
 hair item, not on the figure.
 
+**Areolas and nipples.** Their color and outline are painted in the skin
+image: `areola_size` and `nipple_projection` change the shape only. For another
+color or size of the painted areola use a skin preset or a nipple detail preset
+(`content_search(query="nipples", kind="material", generation=...)`, e.g. the
+Genesis 9 anime nipple presets), in `presets`.
+
 **Teeth, gums, nails, lips.** `colors.teeth`, `colors.gums`, `colors.nails`
 (polish on finger and toe nails), `colors.lips` (Genesis 8 / 8.1 Lips surface;
 on Genesis 9 lips are part of the head: use a lipstick or makeup preset).
@@ -462,6 +488,26 @@ skin in `materials`, or a seam shows. Elf ears and fangs on Genesis 9 starter
 content: elf ears are missing (build on Genesis 8.1 Female, or search an
 "elf" product); fangs use the toon canines (check them, above). Anything else
 the user asks for that is not installed: record it in `notes` and say so.
+
+## 9b. Anatomy geografts
+
+Genitals are not part of the base mesh: Daz adds them as geografts, separate
+figures that merge into the body (Genesis 9 Anatomical Elements; for
+Genesis 8 / 8.1 Daz's or third-party products). They carry their own dials.
+
+- `character_list(include_anatomy="Genesis 9")` lists the installed ones; if
+  the list is empty, tell the user none is installed for that generation. Do
+  not install products without the user's approval (`third-party-assets`).
+- `anatomy=["auto"]` in `character_create` / `character_update` picks the
+  installed one that matches the body (`feminine` / `masculine`, or the Female /
+  Male figure); `anatomy=[path]` names one; `anatomy=[]` removes it. A note
+  says when none is installed; the sheet keeps the request, so it applies after
+  installing one and loading the character again.
+- Their dials: `morph_list("<geograft label>")`, then `dials={"anatomy:<dial>":
+  value}` in the sheet. Generated "MCP" dials follow onto the geograft like
+  onto clothing.
+- Geografts use the skin's materials: if a seam shows, match their surfaces to
+  the skin preset or tone in `materials`.
 
 ## 10. Age without dials
 
@@ -518,7 +564,7 @@ category, `body` or `face` (`character_list(include_traits=true)` shows it):
   "brows": {"items": [], "color": null, "tip_color": null},
   "facial_hair": {"items": [], "color": null, "tip_color": null},
   "colors": {"teeth": null, "gums": null, "nails": "#802030", "lips": null},
-  "clothing": ["People/Genesis 9/Clothing/..."], "extras": [], "presets": [],
+  "anatomy": [], "clothing": ["People/Genesis 9/Clothing/..."], "extras": [], "presets": [],
   "materials": [{"on": "figure", "surfaces": ["Head"], "properties": {"Glossy Roughness": 0.5}}]
 }
 ```
